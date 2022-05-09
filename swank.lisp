@@ -927,7 +927,7 @@ The processing is done in the extent of the toplevel restart."
     (stop-serving-requests c)
     (close (connection.socket-io c))
     (when (connection.dedicated-output c)
-      (close (connection.dedicated-output c)))
+      (ignore-errors (close (connection.dedicated-output c))))
     (setf *connections* (remove c *connections*))
     (run-hook *connection-closed-hook* c)
     (when (and condition (not (typep condition 'end-of-file)))
@@ -2161,8 +2161,8 @@ conditions are simply reported."
                 (*print-pretty* t)
                 (*print-right-margin* 65)
                 (*print-circle* t)
-                (*print-length* (or *print-length* limit))
-                (*print-level* (or *print-level* limit))
+                (*print-length* (or *print-length* 64))
+                (*print-level* (or *print-level* 6))
                 (*print-lines* (or *print-lines* limit)))
             (print-condition condition stream))
         (serious-condition (c)
@@ -2284,7 +2284,7 @@ Operation was KERNEL::DIVISION, operands (1 0).\"
   (invoke-restart (find 'abort *sldb-restarts* :key #'restart-name)))
 
 (defslimefun sldb-continue ()
-  (continue))
+  (invoke-restart (find 'continue *sldb-restarts* :key #'restart-name)))
 
 (defun coerce-to-condition (datum args)
   (etypecase datum
@@ -3641,7 +3641,7 @@ belonging to PACKAGE."
   (let ((alist '()))
     (flet ((consider (symbol)
              (let ((indent (symbol-indentation symbol)))
-               (when indent
+               (when (or indent (gethash symbol cache))
                  (unless (equal (gethash symbol cache) indent)
                    (setf (gethash symbol cache) indent)
                    (let ((pkgs (mapcar #'package-name 

@@ -95,7 +95,10 @@
   (format stream ">")
   nil)
 
-(wrap 'sys::%print-unreadable-object :more-informative :replace '%print-unreadable-object-java-too)
+;;; TODO: move such invocations out of toplevel?  
+(eval-when (:load-toplevel)
+  (unless (get 'sys::%print-unreadable-object 'swank/backend::slime-wrap) 
+    (wrap 'sys::%print-unreadable-object :more-informative :replace '%print-unreadable-object-java-too)))
 
 (defimplementation call-with-compilation-hooks (function)
   (funcall function))
@@ -473,11 +476,11 @@
     (backtrace start end)))
 
 ;; Don't count on JSS being loaded, but if it is then there's some more stuff we can do
-+#+#.(swank/backend:with-symbol 'invoke-restargs 'jss)
+#+#.(swank/backend:with-symbol 'invoke-restargs 'jss)
 (defun jss-p ()
   (and (member "JSS" *modules* :test 'string=) (intern "INVOKE-RESTARGS" "JSS")))
 
-+#+#.(swank/backend:with-symbol 'invoke-restargs 'jss)
+#+#.(swank/backend:with-symbol 'invoke-restargs 'jss)
 (defun matches-jss-call (form)
   (flet ((gensymp (s) (and (symbolp s) (null (symbol-package s))))
          (invokep (s)  (and (symbolp s) (eq s (jss-p)))))
@@ -755,7 +758,7 @@
              (cond ((ext:pathname-jar-p path)
                     `(:location
                       ;; strip off "jar:file:" = 9 characters
-                      (:zip ,@(split-string (subseq path 9) "!/"))
+                      (:zip ,@(split-string (subseq path (length "jar:file:")) "!/"))
                       ;; pos never seems right. Use function name.
                       (:function-name ,(string symbol))
                       (:align t)))
@@ -1002,10 +1005,9 @@
       (when (atom what)
         (setq what (list what sym)))
       (list (definition-specifier what)
-            (if (ext:pathname-jar-p path2)
+            (if (ext:pathname-jar-p (pathname path2))
                 `(:location
-                  ;; JAR-PATHNAME stores the PATHNAME of the jar file as first element of a list DEVICE
-                  (:zip ,@(pathname-device path2))
+                  (:zip ,@(split-string (subseq path2 (length "jar:file:")) "!/"))
                   ;; pos never seems right. Use function name.
                   ,<position>
                   (:align t))
@@ -1289,7 +1291,7 @@
                             (1+ (position #\. (jcall "toString" this)  :from-end t)))
           collect "  "
           collect (list :value this pre)
-          collect (list :strong-value this (jcall "getName" this) )
+          collect (list :value this (jcall "getName" this) )
           collect '(:newline))))
 
 (defun inspector-java-methods (class)
@@ -1313,7 +1315,7 @@
           for after = (subseq desc paren)
           collect "  "
           collect (list :value this pre)
-          collect (list :strong-value this name)
+          collect (list :value this name)
           collect (list :value this after)
           collect '(:newline))))
 
@@ -1349,21 +1351,23 @@
              fields)))))
 
 (defmethod emacs-inspect ((object sys::structure-object))
-  (let ((structure-def (get (type-of object) 'system::structure-definition )))
-    `((:label "Type: ") (:value ,(type-of object)) (:newline)
-      (:label "Class: ") (:value ,(class-of object)) (:newline)
-      ,@(inspector-structure-slot-names-and-values object))))
+  `((:label "Type: ") (:value ,(type-of object)) (:newline)
+    (:label "Class: ") (:value ,(class-of object)) (:newline)
+    ,@(inspector-structure-slot-names-and-values object)))
 
 (defun inspector-structure-slot-names-and-values (structure)
   (let ((structure-def (get (type-of structure) 'system::structure-definition)))
-    `((:label "Slots: ") (:newline)
-      ,@(loop for slotdef in (sys::dd-slots structure-def)
-              for name = (sys::dsd-name slotdef)
-              for reader = (sys::dsd-reader slotdef)
-              for value = (eval `(,reader ,structure))
-              append
-              `("  " (:label ,(string-downcase (string name))) ": " (:value ,value) (:newline))))))
+    (if structure-def
+        `((:label "Slots: ") (:newline)
+          ,@(loop for slotdef in (sys::dd-slots structure-def)
+                  for name = (sys::dsd-name slotdef)
+                  for reader = (sys::dsd-reader slotdef)
+                  for value = (eval `(,reader ,structure))
+                  append
+                  `("  " (:label ,(string-downcase (string name))) ": " (:value ,value) (:newline))))
+        `("No slots available for inspection."))))
 
+#+#.(swank/backend:with-symbol 'get-java-field 'jss)
 (defmethod emacs-inspect ((object sys::structure-class))
   (let* ((name (jss::get-java-field object "name" t))
          (def (get name  'system::structure-definition)))
