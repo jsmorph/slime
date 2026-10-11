@@ -10,7 +10,7 @@ The client generates a fresh 256-bit session name outside the guest.  `open-sess
 
 Each handle is `(kind session-name integer)`, where kind is `:stop`, `:lease`, or `:frame`.  The session table resolves these tokens to opaque guest objects.  The guest service validates their boot identity and lifetime.  A fresh session uses a fresh client-generated name, including after image restore.  Clients must preserve this distinction between creating and resuming a session.
 
-One connection controls a session at a time.  SWANK's connection-closed hook closes its guest controller and clears the session's connection.  A reconnect creates a new controller.  The old leases remain invalid, and accepted commands retain their guest records.  Session release clears the handle tables and retains the used name to reject reuse.
+One connection controls a session at a time.  SWANK's connection-closed hook closes its guest controller and clears the session's connection.  A reconnect creates a new controller.  The old leases remain invalid, and accepted commands retain their guest records.  Session release clears the handle tables and retains the used name to reject reuse.  The first adapter operation after a boot change releases all prior-boot sessions, freeing their handle tables and controllers.
 
 ## RPC API
 

@@ -19,6 +19,7 @@
 
 (defvar *sessions* (make-hash-table :test #'equal))
 (defvar *lock* (mezzano.supervisor:make-mutex 'debugger-sessions))
+(defvar *boot* (mezzano.supervisor:current-boot-id))
 
 (defun reject (reason)
   (error 'protocol-error :reason reason))
@@ -27,6 +28,7 @@
   `(handler-case
        (mezzano.supervisor:without-footholds
          (mezzano.supervisor:with-mutex (*lock*)
+           (retire-old-sessions)
            ,@body))
      (error (condition) (error condition))))
 
@@ -138,7 +140,8 @@
     result))
 
 (defun release-session (session)
-  (mezzano.debug:close-debugger-controller (session-controller session))
+  (when (session-controller session)
+    (mezzano.debug:close-debugger-controller (session-controller session)))
   (setf (session-released-p session) t
         (session-connection session) nil
         (session-controller session) nil)
@@ -146,6 +149,15 @@
   (clrhash (session-objects session))
   (clrhash (session-stops session))
   nil)
+
+(defun retire-old-sessions ()
+  (let ((boot (mezzano.supervisor:current-boot-id)))
+    (unless (eq boot *boot*)
+      (maphash (lambda (name session)
+                 (declare (ignore name))
+                 (release-session session))
+               *sessions*)
+      (setf *boot* boot))))
 
 (defun dispatch (session operation arguments)
   (ecase operation
