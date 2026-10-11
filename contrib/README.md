@@ -12,3 +12,5 @@ See the top level README.md for how to use packages in this directory.
 Finally, the contrib `slime-fancy` is specially noteworthy, as it
 represents a meta-contrib that'll load a bunch of commonly used
 contribs. Look into `slime-fancy.el` to find out which.
+
+The [retained Mezzano debugger](swank-mezzano-debugger.md) provides SWANK access to guest-owned condition stops, with reconnectable control and recorded command outcomes.
