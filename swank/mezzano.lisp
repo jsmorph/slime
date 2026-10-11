@@ -155,7 +155,7 @@
 (defimplementation frame-locals (frame-number)
   (loop
      with frame = (nth frame-number *current-backtrace*)
-     for id = 0
+     for id from 0
      for var in (mezzano.debug:frame-local-variables frame)
      collect (list :name (mezzano.debug:local-variable-name var)
                    :id id
