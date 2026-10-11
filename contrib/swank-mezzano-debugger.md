@@ -6,7 +6,7 @@ The [debugger design](https://github.com/jsmorph/Mezzano/blob/debugging/doc/debu
 
 ## Compatibility and transport
 
-The implementation described here is Slime `2b2086a9951f7b18dc0b88e32729224ba1485029` with the Mezzano service at `37dbb34912616d85f6207edaa5161fa6e410c56a`.  Documentation and test commits can follow those implementation revisions.  The protocol has no version negotiation.  A client requires the listed operations and result fields, including `:operation`.
+Stop operations use the Mezzano service at `37dbb34912616d85f6207edaa5161fa6e410c56a`.  Evaluation operations additionally require the guest service at `0381885f` and the corresponding adapter operations on this branch.  The protocol has no version negotiation.  A client requires the listed operations and result fields, including `:operation`.
 
 Load the contrib through SWANK:
 
@@ -39,9 +39,10 @@ Tokens are proper three-element lists:
 (:stop session-name integer)
 (:lease session-name integer)
 (:frame session-name integer)
+(:job session-name integer)
 ```
 
-The integer indexes the session's token table.  Its numeric value conveys no authority outside that session.  Kind and session membership are checked before the guest validates boot identity and object lifetime.  A stop has a stable token within its session.  Each frame-list command creates fresh guest frame references and therefore new frame tokens.
+The integer indexes the session's token table.  Its numeric value conveys no authority outside that session.  Kind and session membership are checked before the guest validates boot identity and object lifetime.  A stop or job has a stable token within its session.  Each frame-list command creates fresh guest frame references and therefore new frame tokens.
 
 A client that loses the reply to `open-session` must resume that name.  An absent session produces `:expired-session`.  A new attempt uses a fresh name.  Reusing the uncertain name for another open would obscure whether the earlier request succeeded.
 
@@ -128,6 +129,38 @@ Duplicate recognition still requires a valid lease.  A new command uses `:next-c
 
 After image restore, create a fresh session.  Old session tokens are invalid.  Historical command results can be queried through newly discovered stops.  A frame from a historical result remains expired even if it receives a new session token.  Prior-boot commands reject resubmission.  The [design](https://github.com/jsmorph/Mezzano/blob/debugging/doc/debugger.md#disconnect-and-restore) states the tested restore cases and limits.
 
+## Evaluation jobs
+
+Job operations use the same attached session and SWANK transport.  Jobs belong to the guest and continue after connection loss or session release.  Any attached session can discover jobs, read their output and results, and release terminal jobs.  Associated debugger stops retain the exclusive-controller rules above.
+
+| Operation | Arguments | Successful value |
+|---|---|---|
+| `:start-evaluation` | Client-generated name, source string, and optional `:package` and `:input` keywords. | Job token.  Defaults are `"CL-USER"` and an empty input string. |
+| `:jobs` | None. | Tokens for all unreleased jobs. |
+| `:job-information` | Job token. | Job information below. |
+| `:job-output` | Job token, start character offset, optional end offset. | `(:text string :end integer)`.  End defaults to the current output length. |
+| `:release-job` | Job token. | `NIL`.  Releases a terminal job's data. |
+
+Job information has this shape:
+
+```lisp
+(:name string
+ :state job-state
+ :thread thread-name
+ :current-boot-p boolean
+ :stops (stop-token ...)
+ :values (printed-value ...)
+ :output-length integer)
+```
+
+States are `:running`, `:returned`, `:aborted`, and `:unwound`.  A retained condition or printer stop leaves the job `:running`.  Normal completion records `:returned`, including zero values as an empty value list.  The job's ABORT restart records `:aborted` after cleanup.  Another nonlocal exit records `:unwound`.  The value list contains strings printed by the worker.  The adapter runs no application printer to construct this reply.
+
+Input is a supplied string followed by EOF.  Output offsets count Lisp characters.  Reads copy retained output without consuming it, so repeated reads at the same range return the same text.  Output and results remain until release.  Output closes at job completion.  Interactive input and asynchronous interruption remain pending.
+
+A name contains 64 lowercase hexadecimal digits generated from 256 host random bits.  Repeating an identical creation request in the same boot returns the existing job and its stable session token.  Changing source, package object, or input reports `:request-conflict`.  Releasing the job retains its used name, so later creation under that name reports `:released-job`.
+
+Restored jobs require fresh session tokens.  Information reports whether their original submission belongs to the current boot.  Replaying an earlier-boot submission reports `:request-conflict`.  The design records the current restore-test scope.
+
 ## Rejection reasons
 
 The following reasons appear in `(:error reason)`.  Earlier validation can determine which error is reported.  For example, an old lease's stop handle can cause `:expired-stop` before controller validation.
@@ -150,7 +183,7 @@ The following reasons appear in `(:error reason)`.  Earlier validation can deter
 | `:expired-frame` | The frame has the wrong kind, stop, generation, or active lifetime. |
 | `:already-controlled` | A current-boot lease already owns the stop. |
 | `:stop-active` | Release was requested for an active stop. |
-| `:request-conflict` | A reused command ID has another operation/argument or belongs to an earlier boot. |
+| `:request-conflict` | A reused command ID has another operation/argument or belongs to an earlier boot, or a job submission conflicts with its recorded source/package/input or boot. |
 | `:request-order` | A new command ID differs from the stop's next ID. |
 | `:stop-closed` | A new command targets a closed stop. |
 | `:stop-busy` | A pending command, active command, or child stop prevents a new command. |
@@ -158,5 +191,11 @@ The following reasons appear in `(:error reason)`.  Earlier validation can deter
 | `:invalid-restart` | The command argument is outside the retained restart-index range. |
 | `:unknown-operation` | The submitted guest command operation is unsupported. |
 | `:unknown-command` | No command with that ID is recorded for the stop. |
+| `:invalid-job-name` | A job name does not have the required format. |
+| `:invalid-package` | The requested evaluation package does not exist. |
+| `:expired-job` | The guest job handle has the wrong kind or boot identity. |
+| `:released-job` | The job was released, including an attempt to reuse its name. |
+| `:job-active` | Release was requested while the job was running. |
+| `:invalid-output-range` | The requested character range lies outside retained output. |
 
 The host client retries `:session-attached` until its connection deadline, allowing the previous connection's close hook to finish.  Other rejections are reported as `lispm-debugger-client:request-error`, whose reason is available through `request-error-reason`.

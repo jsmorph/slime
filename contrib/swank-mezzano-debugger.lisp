@@ -15,7 +15,8 @@
   (next-handle 0)
   (handles (make-hash-table))
   (objects (make-hash-table :test #'eq))
-  (stops (make-hash-table)))
+  (stops (make-hash-table))
+  (jobs (make-hash-table :test #'equal)))
 
 (defvar *sessions* (make-hash-table :test #'equal))
 (defvar *lock* (mezzano.supervisor:make-mutex 'debugger-sessions))
@@ -131,6 +132,18 @@
           (getf info :child) (encode-stop session (getf info :child)))
     info))
 
+(defun encode-job (session handle)
+  (let ((name (getf (mezzano.debug:evaluation-job-information handle) :name)))
+    (or (gethash name (session-jobs session))
+        (setf (gethash name (session-jobs session))
+              (encode-handle session :job handle)))))
+
+(defun job-information (session handle)
+  (let ((info (mezzano.debug:evaluation-job-information handle)))
+    (setf (getf info :stops)
+          (mapcar (lambda (stop) (encode-stop session stop)) (getf info :stops)))
+    info))
+
 (defun command-result (session handle id)
   (let ((result (mezzano.debug:debugger-command-result handle id)))
     (when (eq (getf result :operation) :frames)
@@ -148,6 +161,7 @@
   (clrhash (session-handles session))
   (clrhash (session-objects session))
   (clrhash (session-stops session))
+  (clrhash (session-jobs session))
   nil)
 
 (defun retire-old-sessions ()
@@ -187,6 +201,27 @@
     (:release-stop
      (destructuring-bind (token) arguments
        (mezzano.debug:release-debugger-stop (decode-handle session :lease token))
+       nil))
+    (:start-evaluation
+     (destructuring-bind (name source &key (package "CL-USER") (input "")) arguments
+       (encode-job session (mezzano.debug:start-evaluation-job
+                            name source :package package :input input))))
+    (:jobs
+     (destructuring-bind () arguments
+       (mapcar (lambda (handle) (encode-job session handle))
+               (mezzano.debug:evaluation-jobs))))
+    (:job-information
+     (destructuring-bind (token) arguments
+       (job-information session (decode-handle session :job token))))
+    (:job-output
+     (destructuring-bind (token start &optional end) arguments
+       (multiple-value-bind (text end)
+           (mezzano.debug:evaluation-job-output
+            (decode-handle session :job token) start end)
+         (list :text text :end end))))
+    (:release-job
+     (destructuring-bind (token) arguments
+       (mezzano.debug:release-evaluation-job (decode-handle session :job token))
        nil))
     (:release-session
      (when arguments (reject :unexpected-arguments))
