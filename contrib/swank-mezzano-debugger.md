@@ -6,7 +6,7 @@ The [debugger design](https://github.com/jsmorph/Mezzano/blob/debugging/doc/debu
 
 ## Compatibility and transport
 
-Stop operations use the Mezzano service at `37dbb34912616d85f6207edaa5161fa6e410c56a`.  Evaluation operations additionally require the guest service at `0381885f` and the corresponding adapter operations on this branch.  The protocol has no version negotiation.  A client requires the listed operations and result fields, including `:operation`.
+Stop operations use the Mezzano service at `37dbb34912616d85f6207edaa5161fa6e410c56a`.  Evaluation operations additionally require the guest service at `0381885f` and Slime `9b2630cd1d72ff15a8a615ab4cfc37d8202865b1`.  The protocol has no version negotiation.  A client requires the listed operations and result fields, including `:operation`.
 
 Load the contrib through SWANK:
 
