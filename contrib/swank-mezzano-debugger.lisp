@@ -223,6 +223,14 @@
      (destructuring-bind (token offset text &key eof) arguments
        (mezzano.debug:supply-evaluation-input
         (decode-handle session :job token) offset text :eof eof)))
+    (:interrupt-job
+     (destructuring-bind (token id) arguments
+       (mezzano.debug:interrupt-evaluation-job
+        (decode-handle session :job token) id)))
+    (:job-interrupt-result
+     (destructuring-bind (token id) arguments
+       (mezzano.debug:evaluation-job-interrupt-result
+        (decode-handle session :job token) id)))
     (:release-job
      (destructuring-bind (token) arguments
        (mezzano.debug:release-evaluation-job (decode-handle session :job token))

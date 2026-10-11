@@ -140,6 +140,8 @@ Job operations use the same attached session and SWANK transport.  Jobs belong t
 | `:job-information` | Job token. | Job information below. |
 | `:job-output` | Job token, start character offset, optional end offset. | `(:text string :end integer)`.  End defaults to the current output length. |
 | `:job-input` | Job token, character offset, text, and optional `:eof` flag. | Ending character offset of accepted or recognized input. |
+| `:interrupt-job` | Job token and interrupt ID. | Accepted or previously accepted interrupt ID. |
+| `:job-interrupt-result` | Job token and interrupt ID. | Interrupt record below. |
 | `:release-job` | Job token. | `NIL`.  Releases a terminal job's data. |
 
 Job information has this shape:
@@ -150,6 +152,8 @@ Job information has this shape:
  :thread thread-name
  :current-boot-p boolean
  :stops (stop-token ...)
+ :next-interrupt-id integer
+ :interrupt-id integer-or-nil
  :input-mode input-mode
  :input-length integer
  :input-eof-p boolean
@@ -158,17 +162,33 @@ Job information has this shape:
  :output-length integer)
 ```
 
-States are `:running`, `:returned`, `:aborted`, and `:unwound`.  A retained condition or printer stop leaves the job `:running`.  Normal completion records `:returned`, including zero values as an empty value list.  The job's ABORT restart records `:aborted` after cleanup.  Another nonlocal exit records `:unwound`.  The value list contains strings printed by the worker.  The adapter runs no application printer to construct this reply.
+States are `:running`, `:returned`, `:aborted`, and `:unwound`.  A retained condition or printer stop leaves the job `:running`.  Normal completion records `:returned`, including zero values as an empty value list.  Reaching the job's ABORT restart clause after cleanup records `:aborted`.  Cleanup can signal another condition or supersede the transfer, including returning control to the computation.  Another exit from the worker records `:unwound`.  The value list contains strings printed by the worker.  The adapter runs no application printer to construct this reply.
 
 Input mode is `:batch` or `:interactive`.  Batch input is a supplied string followed by EOF.  Interactive input waits when its accepted text is exhausted until more text or explicit EOF arrives.  `:input-length` counts accepted characters, `:input-eof-p` records EOF after those characters, and `:input-waiting-p` indicates a pending input read.  EOF state is independent of stream closure at job completion.
 
 Input submission appends text at the accepted length.  A range that already matches retained input succeeds without appending, including after completion.  A gap, mismatch, or partial overlap reports `:input-conflict`.  EOF can accompany appended text or an empty append at the accepted end.  Repeating EOF requires an already recorded EOF at that end.  Further appends after EOF, stream closure, or job completion report `:input-closed`.  Batch jobs reject input submission with `:input-not-interactive`.  Any attached session can supply input.
 
-Output offsets count Lisp characters.  Reads copy retained output without consuming it, so repeated reads at the same range return the same text.  Output and results remain until release.  Both job streams close at completion.  Asynchronous interruption remains pending.
+Output offsets count Lisp characters.  Reads copy retained output without consuming it, so repeated reads at the same range return the same text.  Output and results remain until release.  Both job streams close at completion.
 
 A name contains 64 lowercase hexadecimal digits generated from 256 host random bits.  Repeating an identical creation request in the same boot returns the existing job and its stable session token.  Changing source, package object, initial input, or input mode reports `:request-conflict`.  Releasing the job retains its used name, so later creation under that name reports `:released-job`.
 
 Restored jobs require fresh session tokens.  Information reports whether their original submission belongs to the current boot.  Replaying an earlier-boot submission reports `:request-conflict`.  The design records the current restore-test scope.
+
+### Interrupt records
+
+`:job-interrupt-result` returns:
+
+```lisp
+(:state interrupt-state
+ :current-boot-p boolean
+ :result cancellation-reason-or-nil)
+```
+
+IDs start at zero and increase per job.  Any attached session can submit or query requests.  Same-boot replay of an accepted ID returns that ID without another delivery, including after job completion.  Earlier-boot replay reports `:request-conflict`.  One request can be pending or running per job.
+
+States are `:pending`, `:running`, `:returned`, `:unwound`, `:cancelled`, and `:expired`.  Delivery uses a thread foothold and respects inhibition.  The retained stop offers CONTINUE and the job's ABORT restart.  Continuing records `:returned`.  A nonlocal exit records `:unwound`, independently of the job's final outcome.
+
+Cancellation records `:already-stopped` when delivery finds an existing retained stop, including a running debugger command.  Completion cancels undelivered requests with `:job-complete`.  A queued request selected after restore expires.  A restored running interrupt stop can continue while `:current-boot-p` remains NIL.  The [design](https://github.com/jsmorph/Mezzano/blob/debugging/doc/debugger.md#interruption) specifies lifetimes and test scope.
 
 ## Rejection reasons
 
@@ -192,8 +212,8 @@ The following reasons appear in `(:error reason)`.  Earlier validation can deter
 | `:expired-frame` | The frame has the wrong kind, stop, generation, or active lifetime. |
 | `:already-controlled` | A current-boot lease already owns the stop. |
 | `:stop-active` | Release was requested for an active stop. |
-| `:request-conflict` | A reused command ID has another operation/argument or belongs to an earlier boot, or a job submission conflicts with its recorded source/package/input/mode or boot. |
-| `:request-order` | A new command ID differs from the stop's next ID. |
+| `:request-conflict` | A reused command ID has another operation/argument or belongs to an earlier boot, an interrupt ID belongs to an earlier boot, or a job submission conflicts with its recorded source/package/input/mode or boot. |
+| `:request-order` | A new command or interrupt ID differs from the corresponding next ID. |
 | `:stop-closed` | A new command targets a closed stop. |
 | `:stop-busy` | A pending command, active command, or child stop prevents a new command. |
 | `:unexpected-argument` | A condition, restart-list, or frame-list command received a non-`NIL` argument. |
@@ -204,6 +224,10 @@ The following reasons appear in `(:error reason)`.  Earlier validation can deter
 | `:invalid-package` | The requested evaluation package does not exist. |
 | `:expired-job` | The guest job handle has the wrong kind or boot identity. |
 | `:released-job` | The job was released, including an attempt to reuse its name. |
+| `:job-complete` | A new interruption targets a completed job. |
+| `:interrupt-busy` | The job has a pending or running interrupt request. |
+| `:self-interrupt` | A new request targets the calling thread. |
+| `:unknown-interrupt` | The job has no record for that interrupt ID. |
 | `:job-active` | Release was requested while the job was running. |
 | `:invalid-output-range` | The requested character range lies outside retained output. |
 | `:input-not-interactive` | Input submission targets a batch job. |
