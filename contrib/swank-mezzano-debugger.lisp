@@ -203,9 +203,9 @@
        (mezzano.debug:release-debugger-stop (decode-handle session :lease token))
        nil))
     (:start-evaluation
-     (destructuring-bind (name source &key (package "CL-USER") (input "")) arguments
+     (destructuring-bind (name source &key (package "CL-USER") (input "") interactive) arguments
        (encode-job session (mezzano.debug:start-evaluation-job
-                            name source :package package :input input))))
+                            name source :package package :input input :interactive interactive))))
     (:jobs
      (destructuring-bind () arguments
        (mapcar (lambda (handle) (encode-job session handle))
@@ -219,6 +219,10 @@
            (mezzano.debug:evaluation-job-output
             (decode-handle session :job token) start end)
          (list :text text :end end))))
+    (:job-input
+     (destructuring-bind (token offset text &key eof) arguments
+       (mezzano.debug:supply-evaluation-input
+        (decode-handle session :job token) offset text :eof eof)))
     (:release-job
      (destructuring-bind (token) arguments
        (mezzano.debug:release-evaluation-job (decode-handle session :job token))

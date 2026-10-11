@@ -6,7 +6,7 @@ The [debugger design](https://github.com/jsmorph/Mezzano/blob/debugging/doc/debu
 
 ## Compatibility and transport
 
-Stop operations use the Mezzano service at `37dbb34912616d85f6207edaa5161fa6e410c56a`.  Evaluation operations additionally require the guest service at `0381885f` and Slime `9b2630cd1d72ff15a8a615ab4cfc37d8202865b1`.  The protocol has no version negotiation.  A client requires the listed operations and result fields, including `:operation`.
+The [build instructions](https://github.com/jsmorph/Mezzano/blob/debugging/tools/swank/minideb2/README.md#sources-and-dependencies) record compatible Mezzano and Slime revisions.  The protocol has no version negotiation.  A client requires the listed operations and result fields, including `:operation`.
 
 Load the contrib through SWANK:
 
@@ -135,10 +135,11 @@ Job operations use the same attached session and SWANK transport.  Jobs belong t
 
 | Operation | Arguments | Successful value |
 |---|---|---|
-| `:start-evaluation` | Client-generated name, source string, and optional `:package` and `:input` keywords. | Job token.  Defaults are `"CL-USER"` and an empty input string. |
+| `:start-evaluation` | Client-generated name, source string, and optional `:package`, `:input`, and `:interactive` keywords. | Job token.  Defaults are `"CL-USER"`, an empty input string, and batch mode. |
 | `:jobs` | None. | Tokens for all unreleased jobs. |
 | `:job-information` | Job token. | Job information below. |
 | `:job-output` | Job token, start character offset, optional end offset. | `(:text string :end integer)`.  End defaults to the current output length. |
+| `:job-input` | Job token, character offset, text, and optional `:eof` flag. | Ending character offset of accepted or recognized input. |
 | `:release-job` | Job token. | `NIL`.  Releases a terminal job's data. |
 
 Job information has this shape:
@@ -149,15 +150,23 @@ Job information has this shape:
  :thread thread-name
  :current-boot-p boolean
  :stops (stop-token ...)
+ :input-mode input-mode
+ :input-length integer
+ :input-eof-p boolean
+ :input-waiting-p boolean
  :values (printed-value ...)
  :output-length integer)
 ```
 
 States are `:running`, `:returned`, `:aborted`, and `:unwound`.  A retained condition or printer stop leaves the job `:running`.  Normal completion records `:returned`, including zero values as an empty value list.  The job's ABORT restart records `:aborted` after cleanup.  Another nonlocal exit records `:unwound`.  The value list contains strings printed by the worker.  The adapter runs no application printer to construct this reply.
 
-Input is a supplied string followed by EOF.  Output offsets count Lisp characters.  Reads copy retained output without consuming it, so repeated reads at the same range return the same text.  Output and results remain until release.  Output closes at job completion.  Interactive input and asynchronous interruption remain pending.
+Input mode is `:batch` or `:interactive`.  Batch input is a supplied string followed by EOF.  Interactive input waits when its accepted text is exhausted until more text or explicit EOF arrives.  `:input-length` counts accepted characters, `:input-eof-p` records EOF after those characters, and `:input-waiting-p` indicates a pending input read.  EOF state is independent of stream closure at job completion.
 
-A name contains 64 lowercase hexadecimal digits generated from 256 host random bits.  Repeating an identical creation request in the same boot returns the existing job and its stable session token.  Changing source, package object, or input reports `:request-conflict`.  Releasing the job retains its used name, so later creation under that name reports `:released-job`.
+Input submission appends text at the accepted length.  A range that already matches retained input succeeds without appending, including after completion.  A gap, mismatch, or partial overlap reports `:input-conflict`.  EOF can accompany appended text or an empty append at the accepted end.  Repeating EOF requires an already recorded EOF at that end.  Further appends after EOF, stream closure, or job completion report `:input-closed`.  Batch jobs reject input submission with `:input-not-interactive`.  Any attached session can supply input.
+
+Output offsets count Lisp characters.  Reads copy retained output without consuming it, so repeated reads at the same range return the same text.  Output and results remain until release.  Both job streams close at completion.  Asynchronous interruption remains pending.
+
+A name contains 64 lowercase hexadecimal digits generated from 256 host random bits.  Repeating an identical creation request in the same boot returns the existing job and its stable session token.  Changing source, package object, initial input, or input mode reports `:request-conflict`.  Releasing the job retains its used name, so later creation under that name reports `:released-job`.
 
 Restored jobs require fresh session tokens.  Information reports whether their original submission belongs to the current boot.  Replaying an earlier-boot submission reports `:request-conflict`.  The design records the current restore-test scope.
 
@@ -183,7 +192,7 @@ The following reasons appear in `(:error reason)`.  Earlier validation can deter
 | `:expired-frame` | The frame has the wrong kind, stop, generation, or active lifetime. |
 | `:already-controlled` | A current-boot lease already owns the stop. |
 | `:stop-active` | Release was requested for an active stop. |
-| `:request-conflict` | A reused command ID has another operation/argument or belongs to an earlier boot, or a job submission conflicts with its recorded source/package/input or boot. |
+| `:request-conflict` | A reused command ID has another operation/argument or belongs to an earlier boot, or a job submission conflicts with its recorded source/package/input/mode or boot. |
 | `:request-order` | A new command ID differs from the stop's next ID. |
 | `:stop-closed` | A new command targets a closed stop. |
 | `:stop-busy` | A pending command, active command, or child stop prevents a new command. |
@@ -197,5 +206,8 @@ The following reasons appear in `(:error reason)`.  Earlier validation can deter
 | `:released-job` | The job was released, including an attempt to reuse its name. |
 | `:job-active` | Release was requested while the job was running. |
 | `:invalid-output-range` | The requested character range lies outside retained output. |
+| `:input-not-interactive` | Input submission targets a batch job. |
+| `:input-conflict` | The submitted offset/text/EOF conflicts with retained input. |
+| `:input-closed` | New input was submitted after EOF, stream closure, or job completion. |
 
 The host client retries `:session-attached` until its connection deadline, allowing the previous connection's close hook to finish.  Other rejections are reported as `lispm-debugger-client:request-error`, whose reason is available through `request-error-reason`.
