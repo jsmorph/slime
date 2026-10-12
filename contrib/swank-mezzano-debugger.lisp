@@ -211,6 +211,12 @@
      (destructuring-bind (name source &key (package "CL-USER") (input "") interactive) arguments
        (encode-job session (mezzano.debug:start-evaluation-job
                             name source :package package :input input :interactive interactive))))
+    (:save-private-document
+     (destructuring-bind (name pathname topics) arguments
+       (encode-job session (mezzano.document-examiner:start-save-private-document name pathname topics))))
+    (:read-private-document
+     (destructuring-bind (pathname) arguments
+       (mezzano.document-examiner:read-private-document pathname)))
     (:document-query
      (destructuring-bind (action &key topic (query "") (mode :substring) adjacent) arguments
        (mezzano.document-examiner:query action :topic topic :query query :mode mode :adjacent adjacent)))
