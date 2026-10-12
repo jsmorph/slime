@@ -273,7 +273,7 @@ Each session creates a `MEZZANO.COMMAND-PROCESSOR` Listener on its first Listene
 
 | Operation | Arguments | Successful value |
 |---|---|---|
-| `:listener-information` | None. | A property list with `:package`, `:mode`, `:prompt`, `:busy-p`, and `:default-pathname`. |
+| `:listener-information` | None. | A property list with `:package`, `:mode`, `:prompt`, `:busy-p`, `:default-pathname`, and `:herald`. |
 | `:start-listener` | Name, source, and optional `:interactive`. | Ordinary retained job token. |
 | `:listener-assistance` | Source, cursor, action, and optional `:context` and `:presentation`. | Classification, completion, argument context, or debugger action plan. |
 
@@ -282,6 +282,10 @@ Only one Listener job may run per session.  A new submission while it runs repor
 Assistance actions are `:inspect`, `:space`, `:complete`, `:help`, `:parse`, and `:insert`.  Context defaults to `:listener` and also accepts `:debugger`.  Cursor positions count Unicode characters.  Insert takes a pathname string in `:presentation` and checks that the current argument accepts a pathname.  The reply contains `:kind`, `:text`, `:cursor`, `:prompt`, `:default`, `:expected-type`, `:help`, `:candidates`, `:complete-p`, and `:error`.  Candidate entries contain `:label`, `:text`, `:cursor`, and `:help`.  A `:parse` reply includes `:command` and `:argument`.  Debugger replies also identify `:operation` and, when needed, `:needs-frame`, `:display`, `:local-index`, and `:select-frame`.
 
 Job information adds `:listener-result`, `NIL` for ordinary jobs.  A Listener result contains `:kind` (`:command` or `:form`), optional `:command`, `:effects`, and `:presentations`.  An input error adds `:error` and writes that message to job output.  Runtime conditions enter the retained debugger.  The clear effect is `(:operation :clear-output-history)`.  Pathname presentations contain `:start`, `:end`, `:type :pathname`, and `:value`.  Their character offsets address the job's output string.
+
+Herald presentations contain `:start`, `:end`, `:type :herald`, and `:herald`.  The character offsets delimit the plain-text herald in job output.  The payload has `:title`, `:facts`, `:detailed-p`, `:systems`, and `:help`.  Facts and help are lists of lines.  Each line contains inline records with `:kind` (`:text`, `:emphasis`, or `:key`) and `:text`.  System records contain `:name` and `:version`, with NIL for an undeclared version.  The brief herald has NIL for `:detailed-p` and `:systems`.
+
+Listener information returns a fresh detailed payload in `:herald`.  Show Herald records its captured payload with the retained command output.  Replaying creation or querying that job preserves the captured values.
 
 The [Command Processor guide](https://github.com/jsmorph/Mezzano/blob/debugging/doc/command-processor.md) lists commands, argument types, completion behavior, and compatibility limits.
 
