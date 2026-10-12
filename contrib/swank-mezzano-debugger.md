@@ -1,12 +1,12 @@
-# Retained Mezzano debugger protocol
+# Mezzano remote API
 
-The `swank-mezzano-debugger` contrib transports requests to Mezzano's guest-owned stop service.  A target thread enters that service through `mezzano.debug:call-with-debugger-service`.  Ordinary SWANK evaluation uses SLDB.
+The `swank-mezzano-debugger` contrib exposes retained evaluation jobs, debugger stops, Listener commands, and documentation operations over SWANK.  Evaluation jobs establish retained debugging for their workers.  A separately created thread enters the same service through `mezzano.debug:call-with-debugger-service`.  Ordinary SWANK evaluation uses SLDB.
 
-The [debugger design](https://github.com/jsmorph/Mezzano/blob/debugging/doc/debugger.md) specifies execution, ownership, and lifetime semantics.  The [user guide](https://github.com/jsmorph/Mezzano/blob/debugging/tools/swank/README.md) contains a working session example.  [Build and test instructions](https://github.com/jsmorph/Mezzano/blob/debugging/tools/swank/minideb2/README.md) identify the tested revisions and commands.
+The [debugger guide](https://github.com/jsmorph/Mezzano/blob/debugging/doc/debugger.md) describes supported operations and lifetime rules.  The [remote client guide](https://github.com/jsmorph/Mezzano/blob/debugging/tools/swank/README.md) provides executable session examples.  [Installation and operation](https://github.com/jsmorph/Mezzano/blob/debugging/doc/installation.md) covers the guest and network endpoint.
 
 ## Compatibility and transport
 
-The [build instructions](https://github.com/jsmorph/Mezzano/blob/debugging/tools/swank/minideb2/README.md#sources-and-dependencies) record compatible Mezzano and Slime revisions.  The protocol has no version negotiation.  A client requires the listed operations and result fields, including `:operation`.
+The guest needs Mezzano's debugger, evaluation, Command Processor, and Document Examiner modules, together with this contrib.  The protocol has no version negotiation.  A client must use the operations and result fields provided by its installed server.
 
 Load the contrib through SWANK:
 
@@ -23,7 +23,7 @@ RPCs use SWANK's existing S-expression transport.  Each exported function return
 
 Malformed argument lists, unknown dispatch operations, and other ordinary Lisp errors can enter SWANK's debugger.  The contrib catches its protocol condition and `mezzano.debug:debugger-service-error`.  The host client reports other debugger entries as errors and requests SWANK's top-level abort.
 
-SWANK permits arbitrary guest Lisp evaluation.  Session names and tokens identify debugger objects within that already-authorized connection.  The tested deployment uses loopback forwarding and SSH access.
+SWANK permits arbitrary Lisp evaluation with the guest's authority.  Session names and tokens identify debugger objects within that connection.
 
 ## Sessions and tokens
 
@@ -127,11 +127,11 @@ After a lost reply, resume the session, reacquire control, and query the origina
 
 Duplicate recognition still requires a valid lease.  A new command uses `:next-command-id`, and a busy stop rejects it.  Closed stops retain outcomes and recognize matching prior submissions until explicit release.
 
-After image restore, create a fresh session.  Old session tokens are invalid.  Historical command results can be queried through newly discovered stops.  A frame from a historical result remains expired even if it receives a new session token.  Prior-boot commands reject resubmission.  The [design](https://github.com/jsmorph/Mezzano/blob/debugging/doc/debugger.md#disconnect-and-restore) states the tested restore cases and limits.
+After image restore, create a fresh session.  Old session tokens are invalid.  Historical command results can be queried through newly discovered stops.  A frame from a historical result remains expired even if it receives a new session token.  Prior-boot commands reject resubmission.  The [restore rules](https://github.com/jsmorph/Mezzano/blob/debugging/doc/debugger.md#disconnect-and-restore) describe object lifetimes and supported restore states.
 
 ## Evaluation jobs
 
-Job operations use the same attached session and SWANK transport.  Jobs belong to the guest and continue after connection loss or session release.  Any attached session can discover jobs, read their output and results, and release terminal jobs.  Associated debugger stops retain the exclusive-controller rules above.
+Job operations use the same attached session and SWANK transport.  Source forms execute in order in the requested package with a fresh standard readtable.  Package changes affect subsequent forms within that job.  Jobs belong to the guest and continue after connection loss or session release.  Any attached session can discover jobs, read their output and results, and release terminal jobs.  Associated debugger stops retain the exclusive-controller rules above.
 
 | Operation | Arguments | Successful value |
 |---|---|---|
@@ -172,7 +172,7 @@ Output offsets count Lisp characters.  Reads copy retained output without consum
 
 A name contains 64 lowercase hexadecimal digits generated from 256 host random bits.  Repeating an identical creation request in the same boot returns the existing job and its stable session token.  Changing source, package object, initial input, or input mode reports `:request-conflict`.  Releasing the job retains its used name, so later creation under that name reports `:released-job`.
 
-Restored jobs require fresh session tokens.  Information reports whether their original submission belongs to the current boot.  Replaying an earlier-boot submission reports `:request-conflict`.  The design records the current restore-test scope.
+Restored jobs require fresh session tokens.  Information reports whether their original submission belongs to the current boot.  Replaying an earlier-boot submission reports `:request-conflict`.  The [restore rules](https://github.com/jsmorph/Mezzano/blob/debugging/doc/debugger.md#disconnect-and-restore) describe expiration and resumption.
 
 ### Interrupt records
 
@@ -188,7 +188,7 @@ IDs start at zero and increase per job.  Any attached session can submit or quer
 
 States are `:pending`, `:running`, `:returned`, `:unwound`, `:cancelled`, and `:expired`.  Delivery uses a thread foothold and respects inhibition.  The retained stop offers CONTINUE and the job's ABORT restart.  Continuing records `:returned`.  A nonlocal exit records `:unwound`, independently of the job's final outcome.
 
-Cancellation records `:already-stopped` when delivery finds an existing retained stop, including a running debugger command.  Completion cancels undelivered requests with `:job-complete`.  A queued request selected after restore expires.  A restored running interrupt stop can continue while `:current-boot-p` remains NIL.  The [design](https://github.com/jsmorph/Mezzano/blob/debugging/doc/debugger.md#interruption) specifies lifetimes and test scope.
+Cancellation records `:already-stopped` when delivery finds an existing retained stop, including a running debugger command.  Completion cancels undelivered requests with `:job-complete`.  A queued request selected after restore expires.  A restored running interrupt stop can continue while `:current-boot-p` remains NIL.  The [debugger guide](https://github.com/jsmorph/Mezzano/blob/debugging/doc/debugger.md#interruption) specifies the interruption lifetime.
 
 ## Rejection reasons
 
@@ -221,6 +221,7 @@ The following reasons appear in `(:error reason)`.  Earlier validation can deter
 | `:unknown-operation` | The submitted guest command operation is unsupported. |
 | `:unknown-command` | No command with that ID is recorded for the stop. |
 | `:invalid-job-name` | A job name does not have the required format. |
+| `:listener-busy` | A new Listener submission targets a Listener with a running job. |
 | `:invalid-package` | The requested evaluation package does not exist. |
 | `:expired-job` | The guest job handle has the wrong kind or boot identity. |
 | `:released-job` | The job was released, including an attempt to reuse its name. |
@@ -238,21 +239,21 @@ The host client retries `:session-attached` until its connection deadline, allow
 
 ## Lisp Listener operations
 
-Each session lazily owns a MEZZANO.COMMAND-PROCESSOR Listener.  Its package and pathname default survive connection closure.  Session release and a new boot retire that Listener identity.  Accepted jobs retain their own execution and remain discoverable independently.
+Each session creates a `MEZZANO.COMMAND-PROCESSOR` Listener on its first Listener operation.  Its package and pathname default survive connection closure.  Session release and a new boot retire that Listener identity.  Accepted jobs retain their own execution and remain discoverable independently.
 
 | Operation | Arguments | Successful value |
 |---|---|---|
-| :listener-information | None. | :package, :mode, :prompt, :busy-p, and :default-pathname. |
-| :start-listener | name, source, &key interactive. | Ordinary retained job token. |
-| :listener-assistance | source, cursor, action, &key context presentation. | Classification, completion, argument context, or debugger action plan. |
+| `:listener-information` | None. | A property list with `:package`, `:mode`, `:prompt`, `:busy-p`, and `:default-pathname`. |
+| `:start-listener` | Name, source, and optional `:interactive`. | Ordinary retained job token. |
+| `:listener-assistance` | Source, cursor, action, and optional `:context` and `:presentation`. | Classification, completion, argument context, or debugger action plan. |
 
-Only one Listener job may run per session.  A new submission while it runs reports :listener-busy.  Identical creation replay is recognized before that check.  A Listener job's identity includes its Listener, source, and interactive setting.  Replay checks Listener identity even after Set Package changes its current package.  Ordinary :start-evaluation remains independent.
+Only one Listener job may run per session.  A new submission while it runs reports `:listener-busy`.  Identical creation replay is recognized before that check.  A Listener job's identity includes its Listener, source, and interactive setting.  Replay checks Listener identity even after Set Package changes its current package.  Ordinary `:start-evaluation` remains independent.
 
-Assistance actions are :inspect, :space, :complete, :help, :parse, and :insert.  Context defaults to :listener and also accepts :debugger.  Cursor positions count Unicode characters.  Insert takes a pathname string and checks that the current argument accepts a pathname.  The reply contains :kind, :text, :cursor, :prompt, :default, :expected-type, :help, :candidates, :complete-p, and :error.  Candidate entries contain :label, :text, :cursor, and :help.  A :parse reply includes :command and :argument.  Debugger replies also identify :operation and, when needed, :needs-frame, :display, :local-index, and :select-frame.
+Assistance actions are `:inspect`, `:space`, `:complete`, `:help`, `:parse`, and `:insert`.  Context defaults to `:listener` and also accepts `:debugger`.  Cursor positions count Unicode characters.  Insert takes a pathname string in `:presentation` and checks that the current argument accepts a pathname.  The reply contains `:kind`, `:text`, `:cursor`, `:prompt`, `:default`, `:expected-type`, `:help`, `:candidates`, `:complete-p`, and `:error`.  Candidate entries contain `:label`, `:text`, `:cursor`, and `:help`.  A `:parse` reply includes `:command` and `:argument`.  Debugger replies also identify `:operation` and, when needed, `:needs-frame`, `:display`, `:local-index`, and `:select-frame`.
 
-Job information adds :listener-result, NIL for ordinary jobs.  A Listener result contains :kind (:command or :form), optional :command, :effects, and :presentations.  An input error adds :error and writes that message to job output.  Runtime conditions enter the retained debugger.  The clear effect is (:operation :clear-output-history).  Pathname presentations contain :start, :end, :type :pathname, and :value.  Their character offsets address the job's output string.
+Job information adds `:listener-result`, `NIL` for ordinary jobs.  A Listener result contains `:kind` (`:command` or `:form`), optional `:command`, `:effects`, and `:presentations`.  An input error adds `:error` and writes that message to job output.  Runtime conditions enter the retained debugger.  The clear effect is `(:operation :clear-output-history)`.  Pathname presentations contain `:start`, `:end`, `:type :pathname`, and `:value`.  Their character offsets address the job's output string.
 
-The [Command Processor guide](https://github.com/jsmorph/Mezzano/blob/debugging/doc/command-processor.md) lists supported command arguments, completion behavior, historical sources, tests, and compatibility limits.
+The [Command Processor guide](https://github.com/jsmorph/Mezzano/blob/debugging/doc/command-processor.md) lists commands, argument types, completion behavior, and compatibility limits.
 
 ## Document Examiner operations
 
@@ -266,6 +267,6 @@ Blocks use `:kind :paragraph`, `:code`, `:list`, or `:table`.  Paragraphs contai
 
 `:save-private-document (name pathname topics)` validates the pathname and shape of the ordered string-reference list, then starts a retained evaluation job that writes the private document.  `name` follows the ordinary evaluation-name format.  The result is an ordinary job token.  The worker returns the canonical pathname as its single value.  I/O errors enter the retained debugger.  Repeating the same name, canonical pathname, and original ordered reference strings in the same boot returns the original job, independently of later catalog changes.  The worker resolves topic references before opening the file.  Changed arguments report `:request-conflict`.  File writes use the guest filesystem's `:supersede` behavior.  A write interrupted by an I/O error or machine failure can leave an incomplete file.
 
-`:read-private-document (pathname)` returns `(:pathname canonical-namestring :topics topic-summaries)`, preserving reference order.  It reads one versioned Mezzano record with reader evaluation disabled, rejects malformed and circular lists, trailing forms, and unknown topics, and retains no job.  Pathname and file-format errors follow ordinary SWANK error handling.  An empty pathname selects `SYS:HOME;PRIVATE.PSB`.  Nonempty pathnames use normal guest pathname merging.  `:document-assistance` supplies `save-private-document`, `read-private-document`, `load-private-document`, and `hardcopy-private-document` plans with their canonical pathname in `:argument`.  The browser uses the read result to display topics, add deferred bookmarks, or print unique referenced sections.  Printing preserves the viewer state.  Save retains its original request arguments and typed command through browser reload and replay after an uncertain reply.  The guide records browser test scope and remaining printing limits.
+`:read-private-document (pathname)` returns `(:pathname canonical-namestring :topics topic-summaries)`, preserving reference order.  It reads one versioned Mezzano record with reader evaluation disabled, rejects malformed and circular lists, trailing forms, and unknown topics, and retains no job.  Pathname and file-format errors follow ordinary SWANK error handling.  An empty pathname selects `SYS:HOME;PRIVATE.PSB`.  Nonempty pathnames use normal guest pathname merging.  `:document-assistance` supplies `save-private-document`, `read-private-document`, `load-private-document`, and `hardcopy-private-document` plans with their canonical pathname in `:argument`.  The browser uses the read result to display topics, add deferred bookmarks, or print unique referenced sections.  Printing preserves the viewer state.  Save retains its original request arguments and typed command through browser reload and replay after an uncertain reply.  The browser uses its print dialog for hardcopy output.
 
-Documentation queries use the session's normal request lifetime and retain no evaluation job.  A catalog rebuild through `MEZZANO.DOCUMENT-EXAMINER:LOAD-CATALOG` replaces the catalog after all source files have been read.  Viewer state belongs to the browser.  The [Document Examiner guide](https://github.com/jsmorph/Mezzano/blob/debugging/doc/document-examiner.md) records current commands, source coverage, and differences from Genera.
+Documentation queries use the session's normal request lifetime and retain no evaluation job.  A catalog rebuild through `MEZZANO.DOCUMENT-EXAMINER:LOAD-CATALOG` replaces the catalog after all source files have been read.  Viewer state belongs to the browser.  The [Document Examiner guide](https://github.com/jsmorph/Mezzano/blob/debugging/doc/document-examiner.md) describes reading, searching, viewers, bookmarks, and private documents.
