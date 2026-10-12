@@ -211,6 +211,12 @@
      (destructuring-bind (name source &key (package "CL-USER") (input "") interactive) arguments
        (encode-job session (mezzano.debug:start-evaluation-job
                             name source :package package :input input :interactive interactive))))
+    (:document-query
+     (destructuring-bind (action &key topic (query "") (mode :substring) adjacent) arguments
+       (mezzano.document-examiner:query action :topic topic :query query :mode mode :adjacent adjacent)))
+    (:document-assistance
+     (destructuring-bind (source cursor action) arguments
+       (mezzano.document-examiner:assistance source cursor action)))
     (:listener-information
      (destructuring-bind () arguments
        (mezzano.command-processor:listener-information (ensure-listener session))))
