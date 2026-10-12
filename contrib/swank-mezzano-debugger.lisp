@@ -11,7 +11,7 @@
   ((reason :initarg :reason :reader protocol-error-reason)))
 
 (defstruct session
-  name boot connection controller released-p
+  name boot connection controller released-p listener
   (next-handle 0)
   (handles (make-hash-table))
   (objects (make-hash-table :test #'eq))
@@ -157,7 +157,8 @@
     (mezzano.debug:close-debugger-controller (session-controller session)))
   (setf (session-released-p session) t
         (session-connection session) nil
-        (session-controller session) nil)
+        (session-controller session) nil
+        (session-listener session) nil)
   (clrhash (session-handles session))
   (clrhash (session-objects session))
   (clrhash (session-stops session))
@@ -172,6 +173,10 @@
                  (release-session session))
                *sessions*)
       (setf *boot* boot))))
+
+(defun ensure-listener (session)
+  (or (session-listener session)
+      (setf (session-listener session) (mezzano.command-processor:make-listener))))
 
 (defun dispatch (session operation arguments)
   (ecase operation
@@ -206,6 +211,17 @@
      (destructuring-bind (name source &key (package "CL-USER") (input "") interactive) arguments
        (encode-job session (mezzano.debug:start-evaluation-job
                             name source :package package :input input :interactive interactive))))
+    (:listener-information
+     (destructuring-bind () arguments
+       (mezzano.command-processor:listener-information (ensure-listener session))))
+    (:listener-assistance
+     (destructuring-bind (source cursor action &key (context :listener) presentation) arguments
+       (mezzano.command-processor:assistance (ensure-listener session) source cursor action
+                                            :context context :presentation presentation)))
+    (:start-listener
+     (destructuring-bind (name source &key interactive) arguments
+       (encode-job session (mezzano.command-processor:start-listener
+                            (ensure-listener session) name source :interactive interactive))))
     (:jobs
      (destructuring-bind () arguments
        (mapcar (lambda (handle) (encode-job session handle))
