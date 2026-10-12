@@ -61,6 +61,7 @@ The attached connection sends `request` operations:
 | Operation | Arguments | Successful value |
 |---|---|---|
 | `:stops` | Optional `include-closed`, default `NIL`. | A list of stop tokens.  Ordering is unspecified. |
+| `:processes` | None. | Processes observations described below. |
 | `:information` | Stop token. | Stop information. |
 | `:attach` | Stop token. | A new exclusive control-lease token.  Closed stops can be attached for release. |
 | `:submit` | Lease token, command ID, command operation, optional argument. | The accepted or previously accepted command ID. |
@@ -81,7 +82,7 @@ Stop information has this shape:
  :next-command-id integer)
 ```
 
-Here `stop-state` is `:stopped` or `:closed`.  The thread field comes from the guest thread's name.  Parent ID remains descriptive after parent release.  Parent and child tokens refer to retained records.  Command IDs start at zero and increase within a stop.
+Here `stop-state` is `:stopped` or `:closed`.  The thread field in stop and job information is a bounded display string derived from the guest thread's name, using the label rules in [Processes](#processes).  Parent ID remains descriptive after parent release.  Parent and child tokens refer to retained records.  Command IDs start at zero and increase within a stop.
 
 An illustrative request uses quoted token data inside SWANK's RPC form:
 
@@ -128,6 +129,34 @@ After a lost reply, resume the session, reacquire control, and query the origina
 Duplicate recognition still requires a valid lease.  A new command uses `:next-command-id`, and a busy stop rejects it.  Closed stops retain outcomes and recognize matching prior submissions until explicit release.
 
 After image restore, create a fresh session.  Old session tokens are invalid.  Historical command results can be queried through newly discovered stops.  A frame from a historical result remains expired even if it receives a new session token.  Prior-boot commands reject resubmission.  The [restore rules](https://github.com/jsmorph/Mezzano/blob/debugging/doc/debugger.md#disconnect-and-restore) describe object lifetimes and supported restore states.
+
+## Processes
+
+`:processes` takes no arguments and calls `mezzano.debug:process-summary`.  Its response has this shape:
+
+```lisp
+(:title "Processes"
+ :run-time-units-per-second integer
+ :threads ((:name string
+            :state scheduler-state
+            :priority priority
+            :wait-kind keyword-or-nil
+            :wait string-or-nil
+            :run-time nonnegative-integer
+            :stops (stop-token ...)) ...))
+```
+
+The supervisor samples each row's scheduler fields under its global thread lock.  Thread enumeration and retained-stop association occur separately, so the response describes live observations rather than one atomic system snapshot.  Threads can exit while the query runs.  Rows sampled after death are omitted.  Idle threads are absent from the supervisor's live-thread list.
+
+Scheduler states are `:active`, `:runnable`, `:sleeping`, `:stopped`, `:waiting-for-page-read`, `:waiting-for-page-write`, and `:pager-request`.  Priorities are `:supervisor`, `:high`, `:normal`, `:low`, and `:idle`.  Run time is the recorded processor-time accumulator divided by `:run-time-units-per-second` to obtain seconds.  An active scheduling interval enters that accumulator at switch-out.  CPU utilization is unavailable in this response.
+
+Wait kinds classify sleeping wait items as `:mutex`, `:condition-variable`, `:event`, `:wait-queue`, `:reason`, or `:object`.  Paging uses `:page-read` or `:page-write`.  Pager calls use `:pager-request`.  Other states return NIL wait fields, even when an old wait item remains recorded on the thread.
+
+Names and wait descriptions contain at most 160 characters.  Lisp formats strings, symbols, characters, fixnums, and bounded lists without invoking arbitrary object printers.  ASCII control characters become spaces.  Unsupported objects appear as `[object]`, functions in pager calls as `[function]`, and shortened descriptions end with `[truncated]`.
+
+Thread names can coincide.  The guest associates stops by thread identity and includes every retained active stop, including nested stops, ordered by stop ID.  A retained debugger stop usually has scheduler state `:sleeping`.  Stop tokens use the existing session storage and lifetime rules.  The query creates no thread handles, evaluation jobs, or control leases.
+
+Stop encoding validates each captured handle.  A direct guest release during encoding returns `:released-stop` for the query.  A subsequent query omits that stop.  Adapter requests serialize under the session mutex, so another adapter request cannot release a stop during encoding.
 
 ## Evaluation jobs
 
@@ -199,6 +228,7 @@ The following reasons appear in `(:error reason)`.  Earlier validation can deter
 | `:invalid-session-name` | An open request supplied a name outside the required format. |
 | `:session-name-used` | A session record already uses that name, including a released record. |
 | `:expired-session` | The session is absent, released, or from an earlier boot. |
+| `:missing-topic` | A documentation topic is absent from the current catalog. |
 | `:closed-connection` | The opening/resuming connection is absent from SWANK's live connection list. |
 | `:connection-attached` | The opening/resuming connection already has a session. |
 | `:session-attached` | Another connection remains attached to the requested session. |
@@ -268,5 +298,7 @@ Blocks use `:kind :paragraph`, `:code`, `:list`, or `:table`.  Paragraphs contai
 `:save-private-document (name pathname topics)` validates the pathname and shape of the ordered string-reference list, then starts a retained evaluation job that writes the private document.  `name` follows the ordinary evaluation-name format.  The result is an ordinary job token.  The worker returns the canonical pathname as its single value.  I/O errors enter the retained debugger.  Repeating the same name, canonical pathname, and original ordered reference strings in the same boot returns the original job, independently of later catalog changes.  The worker resolves topic references before opening the file.  Changed arguments report `:request-conflict`.  File writes use the guest filesystem's `:supersede` behavior.  A write interrupted by an I/O error or machine failure can leave an incomplete file.
 
 `:read-private-document (pathname)` returns `(:pathname canonical-namestring :topics topic-summaries)`, preserving reference order.  It reads one versioned Mezzano record with reader evaluation disabled, rejects malformed and circular lists, trailing forms, and unknown topics, and retains no job.  Pathname and file-format errors follow ordinary SWANK error handling.  An empty pathname selects `SYS:HOME;PRIVATE.PSB`.  Nonempty pathnames use normal guest pathname merging.  `:document-assistance` supplies `save-private-document`, `read-private-document`, `load-private-document`, and `hardcopy-private-document` plans with their canonical pathname in `:argument`.  The browser uses the read result to display topics, add deferred bookmarks, or print unique referenced sections.  Printing preserves the viewer state.  Save retains its original request arguments and typed command through browser reload and replay after an uncertain reply.  The browser uses its print dialog for hardcopy output.
+
+An absent topic produces `:missing-topic` from `:document-query`, and the session remains usable.
 
 Documentation queries use the session's normal request lifetime and retain no evaluation job.  A catalog rebuild through `MEZZANO.DOCUMENT-EXAMINER:LOAD-CATALOG` replaces the catalog after all source files have been read.  Viewer state belongs to the browser.  The [Document Examiner guide](https://github.com/jsmorph/Mezzano/blob/debugging/doc/document-examiner.md) describes reading, searching, viewers, bookmarks, and private documents.

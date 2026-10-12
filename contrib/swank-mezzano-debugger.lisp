@@ -132,6 +132,13 @@
           (getf info :child) (encode-stop session (getf info :child)))
     info))
 
+(defun process-summary (session)
+  (let ((summary (mezzano.debug:process-summary)))
+    (dolist (row (getf summary :threads))
+      (setf (getf row :stops)
+            (mapcar (lambda (handle) (encode-stop session handle)) (getf row :stops))))
+    summary))
+
 (defun encode-job (session handle)
   (let ((name (getf (mezzano.debug:evaluation-job-information handle) :name)))
     (or (gethash name (session-jobs session))
@@ -180,6 +187,9 @@
 
 (defun dispatch (session operation arguments)
   (ecase operation
+    (:processes
+     (destructuring-bind () arguments
+       (process-summary session)))
     (:stops
      (destructuring-bind (&optional include-closed) arguments
        (mapcar (lambda (handle) (encode-stop session handle))
