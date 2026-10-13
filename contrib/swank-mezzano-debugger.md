@@ -77,6 +77,8 @@ Stop information has this shape:
 ```lisp
 (:id integer
  :state stop-state
+ :depth positive-integer
+ :prompt string
  :thread thread-name
  :parent-id integer-or-nil
  :parent stop-token-or-nil
@@ -118,6 +120,9 @@ The example name and token are placeholders.
 | `:frames` | `NIL` or omitted. | List of `(:frame frame-token :function string)`, from the service activation toward older callers. |
 | `:locals` | A frame token from this stop. | List of `(:index integer :name string :available-p boolean :value string-or-nil)`. |
 | `:invoke-restart` | Restart index. | List of printed values if the restart returns to the command.  Invocation supplies zero arguments. |
+| `:invoke-restart-interactively` | Restart index. | List of printed values if the restart returns.  Its interactive function obtains arguments through QUERY-IO. |
+| `:abort` | NIL or omitted. | Invokes the innermost captured CL:ABORT restart.  A returning restart supplies printed values. |
+| `:help` | NIL or omitted. | Guest debugger command descriptions as a string. |
 
 A printed Lisp `NIL` is the string `"NIL"`.  An unavailable local has `:available-p NIL` and `:value NIL`.  Restart names and local names are printed representations and can include package prefixes.  Local indices identify entries within that returned list.  The current API accepts frame tokens for inspection and exposes no local-write operation.
 
@@ -271,7 +276,7 @@ The following reasons appear in `(:error reason)`.  Earlier validation can deter
 | `:request-order` | A new command or interrupt ID differs from the corresponding next ID. |
 | `:stop-closed` | A new command targets a closed stop. |
 | `:stop-busy` | A pending command, active command, or child stop prevents a new command. |
-| `:unexpected-argument` | A condition, restart-list, or frame-list command received a non-`NIL` argument. |
+| `:unexpected-argument` | A no-argument debugger command received a non-NIL argument. |
 | `:invalid-restart` | The command argument is outside the retained restart-index range. |
 | `:unknown-operation` | The submitted guest command operation is unsupported. |
 | `:unknown-command` | No command with that ID is recorded for the stop. |
@@ -298,7 +303,7 @@ Each session creates a `MEZZANO.COMMAND-PROCESSOR` Listener on its first Listene
 
 | Operation | Arguments | Successful value |
 |---|---|---|
-| `:listener-information` | None. | A property list with `:package`, `:mode`, `:prompt`, `:busy-p`, `:active-job`, `:default-pathname`, and `:herald`. |
+| `:listener-information` | None. | A property list with `:package`, `:mode`, `:prompt`, `:busy-p`, `:active-job`, `:debugger`, `:default-pathname`, and `:herald`. |
 | `:start-listener` | Name, source, and optional `:interactive`. | Ordinary retained job token. |
 | `:listener-assistance` | Source, cursor, action, and optional `:context` and `:presentation`. | Classification, completion, argument context, or debugger action plan. |
 
@@ -342,3 +347,13 @@ The Mezzano test holds a registration request in an isolated sentinel and checks
 (load (compile-file "SYS:HOME;SLIME;CONTRIB;SWANK-MEZZANO-REGISTRATION-TEST.LISP"))
 (swank-mezzano-registration-test:run)
 ```
+
+## Debugger command recovery and Listener context
+
+Each debugger command establishes an ABORT restart.  An error during the command can enter a child stop.  Invoking that restart abandons the command and returns to the enclosing stopped computation's debugger loop.  The abandoned command records :UNWOUND.  The parent stop remains :STOPPED.
+
+SUBMIT accepts :ABORT and :HELP without arguments.  :ABORT invokes the innermost captured CL:ABORT restart.  :HELP returns a string from the guest debugger command definitions.  :INVOKE-RESTART-INTERACTIVELY accepts the same zero-based restart index as :INVOKE-RESTART and calls the restart's interactive argument reader.  Both operations return printed multiple values when the restart returns, or record :UNWOUND on a nonlocal exit.  Existing :INVOKE-RESTART behavior supplies zero arguments.
+
+Stop information includes one-based :DEPTH and the nesting :PROMPT.  LISTENER-INFORMATION and MONITOR-STATE's :LISTENER include :DEBUGGER.  Its value is NIL when the Listener has no retained stop, or a property list containing :STOP (a typed stop token), :DEPTH, and :PROMPT for the innermost stop belonging to its active job.  The guest selects that stop under the service lock.
+
+For interactive evaluations, restart argument readers use retained QUERY-IO, and JOB-INPUT supplies their input.  The debugger command remains :RUNNING during the read.  Conditions in the reader enter child stops.  Required arguments without an interactive function need explicit argument invocation, which remains planned.

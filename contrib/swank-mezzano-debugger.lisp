@@ -185,6 +185,13 @@
   (or (session-listener session)
       (setf (session-listener session) (mezzano.command-processor:make-listener))))
 
+(defun listener-information (session)
+  (let* ((info (mezzano.command-processor:listener-information (ensure-listener session)))
+         (debugger (getf info :debugger)))
+    (when debugger
+      (setf (getf debugger :stop) (encode-stop session (getf debugger :stop))))
+    info))
+
 (defun monitor-stop-token (session handle)
   (handler-case (encode-stop session handle)
     (mezzano.debug:debugger-service-error (condition)
@@ -253,7 +260,7 @@
         (check-type start (integer 0 *))
         (when (gethash name starts) (reject :duplicate-output-offset))
         (setf (gethash name starts) start)))
-    (let ((listener (mezzano.command-processor:listener-information (ensure-listener session)))
+    (let ((listener (listener-information session))
           (entries (loop for handle in (mezzano.debug:evaluation-jobs)
                          for row = (monitor-job session handle starts)
                          when row collect (cons handle row))))
@@ -315,7 +322,7 @@
        (mezzano.document-examiner:assistance source cursor action)))
     (:listener-information
      (destructuring-bind () arguments
-       (mezzano.command-processor:listener-information (ensure-listener session))))
+       (listener-information session)))
     (:listener-assistance
      (destructuring-bind (source cursor action &key (context :listener) presentation) arguments
        (mezzano.command-processor:assistance (ensure-listener session) source cursor action
