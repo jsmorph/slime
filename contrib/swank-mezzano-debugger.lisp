@@ -185,8 +185,58 @@
   (or (session-listener session)
       (setf (session-listener session) (mezzano.command-processor:make-listener))))
 
+(defun monitor-stop-token (session handle)
+  (handler-case (encode-stop session handle)
+    (mezzano.debug:debugger-service-error (condition)
+      (unless (eq (mezzano.debug:debugger-service-error-reason condition) :released-stop)
+        (error condition)))))
+
+(defun monitor-job (session handle offsets)
+  (handler-case
+      (let* ((info (mezzano.debug:evaluation-job-information handle))
+             (start (gethash (getf info :name) offsets 0))
+             (end (getf info :output-length)))
+        (setf (getf info :stops)
+              (remove nil (mapcar (lambda (stop) (monitor-stop-token session stop))
+                                  (getf info :stops))))
+        (multiple-value-bind (text end)
+            (mezzano.debug:evaluation-job-output handle start end)
+          (list :token (encode-job session handle)
+                :information info :output (list :start start :text text :end end))))
+    (mezzano.debug:debugger-service-error (condition)
+      (unless (eq (mezzano.debug:debugger-service-error-reason condition) :released-job)
+        (error condition)))))
+
+(defun monitor-stop (session handle)
+  (handler-case
+      (let ((info (mezzano.debug:debugger-stop-information handle)))
+        (setf (getf info :parent) (monitor-stop-token session (getf info :parent))
+              (getf info :child) (monitor-stop-token session (getf info :child)))
+        (let ((token (monitor-stop-token session handle)))
+          (when token (list :token token :information info))))
+    (mezzano.debug:debugger-service-error (condition)
+      (unless (eq (mezzano.debug:debugger-service-error-reason condition) :released-stop)
+        (error condition)))))
+
+(defun monitor-state (session offsets)
+  (let ((starts (make-hash-table :test #'equal)))
+    (dolist (offset offsets)
+      (destructuring-bind (name start) offset
+        (check-type name string)
+        (check-type start (integer 0 *))
+        (when (gethash name starts) (reject :duplicate-output-offset))
+        (setf (gethash name starts) start)))
+    (list :listener (mezzano.command-processor:listener-information (ensure-listener session))
+          :jobs (remove nil (mapcar (lambda (handle) (monitor-job session handle starts))
+                                   (mezzano.debug:evaluation-jobs)))
+          :stops (remove nil (mapcar (lambda (handle) (monitor-stop session handle))
+                                    (mezzano.debug:debugger-stops :include-closed t))))))
+
 (defun dispatch (session operation arguments)
   (ecase operation
+    (:monitor-state
+     (destructuring-bind (&optional offsets) arguments
+       (monitor-state session offsets)))
     (:processes
      (destructuring-bind () arguments
        (process-summary session)))

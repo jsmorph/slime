@@ -62,6 +62,7 @@ The attached connection sends `request` operations:
 |---|---|---|
 | `:stops` | Optional `include-closed`, default `NIL`. | A list of stop tokens.  Ordering is unspecified. |
 | `:processes` | None. | Processes observations described below. |
+| `:monitor-state` | Optional list of `(job-name start-offset)` pairs. | Listener, jobs with output increments, and all retained stops. |
 | `:information` | Stop token. | Stop information. |
 | `:attach` | Stop token. | A new exclusive control-lease token.  Closed stops can be attached for release. |
 | `:submit` | Lease token, command ID, command operation, optional argument. | The accepted or previously accepted command ID. |
@@ -129,6 +130,23 @@ After a lost reply, resume the session, reacquire control, and query the origina
 Duplicate recognition still requires a valid lease.  A new command uses `:next-command-id`, and a busy stop rejects it.  Closed stops retain outcomes and recognize matching prior submissions until explicit release.
 
 After image restore, create a fresh session.  Old session tokens are invalid.  Historical command results can be queried through newly discovered stops.  A frame from a historical result remains expired even if it receives a new session token.  Prior-boot commands reject resubmission.  The [restore rules](https://github.com/jsmorph/Mezzano/blob/debugging/doc/debugger.md#disconnect-and-restore) describe object lifetimes and supported restore states.
+
+## Monitor state
+
+`:monitor-state` gathers the Listener information, jobs, and active and closed stops in one request.  Each supplied offset is a nonnegative Lisp character offset for the named job.  An omitted job starts at zero.  Duplicate names report `:duplicate-output-offset`.  An offset beyond that job's output length reports `:invalid-output-range`.  Offsets for jobs that have been released or do not exist are ignored.
+
+```lisp
+(:listener listener-information
+ :jobs ((:token job-token :information job-information
+         :output (:start integer :text string :end integer)) ...)
+ :stops ((:token stop-token :information stop-information) ...))
+```
+
+Output ends at the length captured in that row's job information.  The next request supplies the returned end offset to read later output.  Empty increments return an empty string.  Tokens retain their existing session identity.  The operation acquires no control leases and creates no evaluation jobs.
+
+The complete encoded reply must fit SWANK's six-digit hexadecimal length header, whose maximum payload is 16,777,215 bytes.  All output increments share that limit.  The batch operation does not paginate or truncate output.  The individual job-information and ranged job-output operations remain available.
+
+The adapter serializes the request under its session lock.  Guest service reads use their existing locks.  Jobs, output, and stops can change between reads, so the response contains observations taken during the request.  A job or stop released by a direct guest operation during enumeration is omitted.  A released related stop is omitted from its job's stop list or replaced by NIL in a parent or child field.  Other service errors propagate.  Debugger command results remain available through `:result`.
 
 ## Processes
 
@@ -228,6 +246,7 @@ The following reasons appear in `(:error reason)`.  Earlier validation can deter
 | `:invalid-session-name` | An open request supplied a name outside the required format. |
 | `:session-name-used` | A session record already uses that name, including a released record. |
 | `:expired-session` | The session is absent, released, or from an earlier boot. |
+| `:duplicate-output-offset` | A monitor-state request supplies more than one offset for a job name. |
 | `:missing-topic` | A documentation topic is absent from the current catalog. |
 | `:closed-connection` | The opening/resuming connection is absent from SWANK's live connection list. |
 | `:connection-attached` | The opening/resuming connection already has a session. |
