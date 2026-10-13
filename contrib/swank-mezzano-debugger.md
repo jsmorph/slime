@@ -298,9 +298,11 @@ Each session creates a `MEZZANO.COMMAND-PROCESSOR` Listener on its first Listene
 
 | Operation | Arguments | Successful value |
 |---|---|---|
-| `:listener-information` | None. | A property list with `:package`, `:mode`, `:prompt`, `:busy-p`, `:default-pathname`, and `:herald`. |
+| `:listener-information` | None. | A property list with `:package`, `:mode`, `:prompt`, `:busy-p`, `:active-job`, `:default-pathname`, and `:herald`. |
 | `:start-listener` | Name, source, and optional `:interactive`. | Ordinary retained job token. |
 | `:listener-assistance` | Source, cursor, action, and optional `:context` and `:presentation`. | Classification, completion, argument context, or debugger action plan. |
+
+Listener information reports `:active-job` as the current running evaluation's name, or NIL when the Listener is idle.  `:busy-p` and `:active-job` are sampled together under the service lock.  A retained debugger stop leaves its evaluation running and its Listener busy.
 
 Only one Listener job may run per session.  A new submission while it runs reports `:listener-busy`.  Identical creation replay is recognized before that check.  A Listener job's identity includes its Listener, source, and interactive setting.  Replay checks Listener identity even after Set Package changes its current package.  Ordinary `:start-evaluation` remains independent.
 
