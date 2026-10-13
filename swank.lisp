@@ -221,7 +221,7 @@ Backend code should treat the connection structure as opaque.")
                        :socket-io stream
                        :communication-style style)))
     (run-hook *new-connection-hook* conn)
-    (send-to-sentinel `(:add-connection ,conn))
+    (register-connection conn)
     conn))
 
 (defslimefun ping (tag)
@@ -564,10 +564,20 @@ recently established one."
     (cond (sentinel (send sentinel msg))
           (t (sentinel-serve msg)))))
 
+(defun register-connection (connection)
+  (let ((sentinel (find-registered 'sentinel)))
+    (if (and sentinel (not (eq sentinel (current-thread))))
+        (let ((reply (list :connection-added connection)))
+          (send sentinel (list :add-connection connection (current-thread)))
+          (receive-if (lambda (message) (equal message reply))))
+        (sentinel-serve (list :add-connection connection)))))
+
 (defun sentinel-serve (msg)
   (dcase msg
-    ((:add-connection conn)
-     (push conn *connections*))
+    ((:add-connection conn &optional waiting-thread)
+     (push conn *connections*)
+     (when waiting-thread
+       (send waiting-thread (list :connection-added conn))))
     ((:close-connection connection condition backtrace)
      (close-connection% connection condition backtrace)
      (sentinel-maybe-exit))

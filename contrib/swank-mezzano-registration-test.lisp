@@ -1,0 +1,78 @@
+(defpackage #:swank-mezzano-registration-test
+  (:use #:cl)
+  (:export #:run #:delayed-registration-p))
+(in-package #:swank-mezzano-registration-test)
+
+(defun await (predicate)
+  (let ((deadline (+ (get-internal-real-time) (* 10 internal-time-units-per-second))))
+    (loop until (funcall predicate)
+          do (when (> (get-internal-real-time) deadline)
+               (error "Connection registration test exceeded its deadline."))
+             (sleep 0.01))))
+
+(defun delayed-registration-p ()
+  (let* ((registry (make-hash-table))
+         (received (mezzano.supervisor:make-event))
+         (release (mezzano.supervisor:make-event))
+         (completed (mezzano.supervisor:make-event))
+         (connection nil)
+         (registered nil)
+         (owner-error nil)
+         (worker-error nil)
+         (owner (swank-backend:spawn
+                 (lambda ()
+                   (let ((swank::*connections* nil))
+                     (handler-case
+                         (let ((message (swank-backend:receive)))
+                           (unless (eq message :abort-test)
+                             (setf (mezzano.supervisor:event-state received) t)
+                             (mezzano.supervisor:event-wait release)
+                             (swank::sentinel-serve message)
+                             (setf registered (first swank::*connections*))))
+                       (error (condition) (setf owner-error condition)))))
+                 :name "Registration test sentinel"))
+         (worker nil)
+         (waited nil))
+    (setf (gethash 'swank::sentinel registry) owner)
+    (unwind-protect
+         (progn
+           (setf worker
+                 (swank-backend:spawn
+                  (lambda ()
+                    (let ((swank/mezzano::*registered-threads* registry)
+                          (swank::*new-connection-hook* nil))
+                      (handler-case
+                          (setf connection (swank::make-connection
+                                            nil (make-string-output-stream) :spawn))
+                        (error (condition) (setf worker-error condition))))
+                    (setf (mezzano.supervisor:event-state completed) t))
+                  :name "Registration test caller"))
+           (await (lambda () (or owner-error worker-error
+                                 (mezzano.supervisor:event-state received))))
+           (when owner-error (error owner-error))
+           (when worker-error (error worker-error))
+           (await (lambda () (member (mezzano.supervisor::sample-thread-state worker)
+                                     '(:sleeping :dead))))
+           (setf waited (not (mezzano.supervisor:event-state completed))))
+      (setf (mezzano.supervisor:event-state release) t)
+      (unless (mezzano.supervisor:event-state received)
+        (swank-backend:send owner :abort-test))
+      (mezzano.supervisor:thread-join owner)
+      (when worker (mezzano.supervisor:thread-join worker)))
+    (when owner-error (error owner-error))
+    (when worker-error (error worker-error))
+    (assert (eq connection registered))
+    waited))
+
+(defun run ()
+  (assert (delayed-registration-p))
+  (dolist (sentinel (list nil (swank-backend:current-thread)))
+    (let ((swank/mezzano::*registered-threads* (make-hash-table))
+          (swank::*connections* nil)
+          (swank::*new-connection-hook* nil))
+      (when sentinel
+        (setf (gethash 'swank::sentinel swank/mezzano::*registered-threads*) sentinel))
+      (let ((connection (swank::make-connection nil (make-string-output-stream) :spawn)))
+        (assert (equal swank::*connections* (list connection))))))
+  (format t "PASS delayed, direct, and sentinel-thread connection registration.~%")
+  t)

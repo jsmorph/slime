@@ -31,6 +31,8 @@ The client creates a fresh name from 256 random bits outside the guest, encoded 
 
 One connection can attach to one session, and one session can attach to one connection.  When SWANK closes the connection, its hook closes the session's guest controller and clears the connection association.  Token tables survive that disconnect.  Resuming creates a new controller, so the client reacquires a lease before submitting another command.
 
+SWANK completes connection registration before starting request handling.  With a sentinel thread, the accepting thread waits for the sentinel to add the connection and acknowledge it.  Session attachment can then check the registered connection without racing its startup.
+
 Explicit session release clears its controller, connection, and token tables.  The first adapter operation after a boot change releases all old sessions.  The adapter retains used names, including released names, to reject reuse.  Stop records and their command history have independent guest lifetimes.
 
 Tokens are proper three-element lists:
@@ -329,3 +331,12 @@ Blocks use `:kind :paragraph`, `:code`, `:list`, or `:table`.  Paragraphs contai
 An absent topic produces `:missing-topic` from `:document-query`, and the session remains usable.
 
 Documentation queries use the session's normal request lifetime and retain no evaluation job.  A catalog rebuild through `MEZZANO.DOCUMENT-EXAMINER:LOAD-CATALOG` replaces the catalog after all source files have been read.  Viewer state belongs to the browser.  The [Document Examiner guide](https://github.com/jsmorph/Mezzano/blob/debugging/doc/document-examiner.md) describes reading, searching, viewers, bookmarks, and private documents.
+
+## Connection registration tests
+
+The Mezzano test holds a registration request in an isolated sentinel and checks that MAKE-CONNECTION waits for acknowledgment.  It also tests direct registration and registration from the sentinel thread.  It keeps its connection and thread registries separate from the running server.
+
+```lisp
+(load (compile-file "SYS:HOME;SLIME;CONTRIB;SWANK-MEZZANO-REGISTRATION-TEST.LISP"))
+(swank-mezzano-registration-test:run)
+```
