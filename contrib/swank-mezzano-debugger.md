@@ -250,6 +250,8 @@ The following reasons appear in `(:error reason)`.  Earlier validation can deter
 | `:expired-session` | The session is absent, released, or from an earlier boot. |
 | `:duplicate-output-offset` | A monitor-state request supplies more than one offset for a job name. |
 | `:missing-topic` | A documentation topic is absent from the current catalog. |
+| `:invalid-private-document` | A private document has invalid reader syntax, record shape, or topic-reference data. |
+| `:private-document-io-error` | A private-document read reports a file or stream error. |
 | `:closed-connection` | The opening/resuming connection is absent from SWANK's live connection list. |
 | `:connection-attached` | The opening/resuming connection already has a session. |
 | `:session-attached` | Another connection remains attached to the requested session. |
