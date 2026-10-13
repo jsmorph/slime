@@ -142,9 +142,11 @@ After image restore, create a fresh session.  Old session tokens are invalid.  H
  :stops ((:token stop-token :information stop-information) ...))
 ```
 
-Output ends at the length captured in that row's job information.  The next request supplies the returned end offset to read later output.  Empty increments return an empty string.  Tokens retain their existing session identity.  The operation acquires no control leases and creates no evaluation jobs.
+Output text shares a 65,536-character budget across the response.  Each row's `:output-length` records its full sampled length.  The delivered `:end` can be smaller.  The next request supplies each returned end offset to continue reading.  Empty increments return an empty string.  A completed job can still have unread output.  Tokens retain their existing session identity.  The operation acquires no control leases and creates no evaluation jobs.
 
-The complete encoded reply must fit SWANK's six-digit hexadecimal length header, whose maximum payload is 16,777,215 bytes.  All output increments share that limit.  The batch operation does not paginate or truncate output.  The individual job-information and ranged job-output operations remain available.
+The adapter sorts unread rows by supplied offset, divides the remaining budget among the remaining unread rows, and returns rows in their original order.  A short row leaves its unused share for later rows.  When unread rows outnumber the budget, lower-offset rows receive characters first.  Advancing returned offsets allows other rows to receive output on later requests.  No output is discarded and no read cursor is retained in the guest.
+
+The complete encoded reply must fit SWANK's six-digit hexadecimal length header, whose maximum payload is 16,777,215 bytes.  The character budget bounds output text.  Metadata, including printed values, remains subject to that message limit.  The individual job-information and ranged job-output operations remain available.
 
 The adapter serializes the request under its session lock.  Guest service reads use their existing locks.  Jobs, output, and stops can change between reads, so the response contains observations taken during the request.  A job or stop released by a direct guest operation during enumeration is omitted.  A released related stop is omitted from its job's stop list or replaced by NIL in a parent or child field.  Other service errors propagate.  Debugger command results remain available through `:result`.
 

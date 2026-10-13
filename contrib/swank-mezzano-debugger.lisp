@@ -194,18 +194,45 @@
 (defun monitor-job (session handle offsets)
   (handler-case
       (let* ((info (mezzano.debug:evaluation-job-information handle))
-             (start (gethash (getf info :name) offsets 0))
-             (end (getf info :output-length)))
+             (start (gethash (getf info :name) offsets 0)))
         (setf (getf info :stops)
               (remove nil (mapcar (lambda (stop) (monitor-stop-token session stop))
                                   (getf info :stops))))
         (multiple-value-bind (text end)
-            (mezzano.debug:evaluation-job-output handle start end)
+            (mezzano.debug:evaluation-job-output
+             handle start (min start (getf info :output-length)))
           (list :token (encode-job session handle)
                 :information info :output (list :start start :text text :end end))))
     (mezzano.debug:debugger-service-error (condition)
       (unless (eq (mezzano.debug:debugger-service-error-reason condition) :released-job)
         (error condition)))))
+
+(defun fill-monitor-output (entries budget)
+  (let* ((unread (stable-sort
+                  (remove-if-not
+                   (lambda (entry)
+                     (< (getf (getf (cdr entry) :output) :start)
+                        (getf (getf (cdr entry) :information) :output-length)))
+                   (copy-list entries))
+                  #'< :key (lambda (entry) (getf (getf (cdr entry) :output) :start))))
+         (remaining (length unread)))
+    (dolist (entry unread)
+      (when (plusp budget)
+        (let* ((row (cdr entry))
+               (start (getf (getf row :output) :start))
+               (end (min (getf (getf row :information) :output-length)
+                         (+ start (ceiling budget remaining)))))
+          (handler-case
+              (multiple-value-bind (text end)
+                  (mezzano.debug:evaluation-job-output (car entry) start end)
+                (setf (getf row :output) (list :start start :text text :end end))
+                (decf budget (- end start)))
+            (mezzano.debug:debugger-service-error (condition)
+              (if (eq (mezzano.debug:debugger-service-error-reason condition) :released-job)
+                  (setf (cdr entry) nil)
+                  (error condition))))))
+      (decf remaining)))
+  (remove nil (mapcar #'cdr entries)))
 
 (defun monitor-stop (session handle)
   (handler-case
@@ -226,11 +253,14 @@
         (check-type start (integer 0 *))
         (when (gethash name starts) (reject :duplicate-output-offset))
         (setf (gethash name starts) start)))
-    (list :listener (mezzano.command-processor:listener-information (ensure-listener session))
-          :jobs (remove nil (mapcar (lambda (handle) (monitor-job session handle starts))
-                                   (mezzano.debug:evaluation-jobs)))
-          :stops (remove nil (mapcar (lambda (handle) (monitor-stop session handle))
-                                    (mezzano.debug:debugger-stops :include-closed t))))))
+    (let ((listener (mezzano.command-processor:listener-information (ensure-listener session)))
+          (entries (loop for handle in (mezzano.debug:evaluation-jobs)
+                         for row = (monitor-job session handle starts)
+                         when row collect (cons handle row))))
+      (list :listener listener
+            :jobs (fill-monitor-output entries 65536)
+            :stops (remove nil (mapcar (lambda (handle) (monitor-stop session handle))
+                                      (mezzano.debug:debugger-stops :include-closed t)))))))
 
 (defun dispatch (session operation arguments)
   (ecase operation
