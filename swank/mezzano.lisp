@@ -317,8 +317,8 @@
 
 ;;;; Multithreading
 
-;; Weak :KEY-OR-VALUE as this contains both id->thread and thread->id mappings.
-(defvar *thread-ids-for-emacs* (make-hash-table :weakness :key-or-value))
+;; Integer IDs must not retain threads in either direction.
+(defvar *thread-ids-for-emacs* (make-hash-table :weakness :key-and-value))
 (defvar *next-thread-id-for-emacs* 0)
 (defvar *thread-id-for-emacs-lock* (mezzano.supervisor:make-mutex
                                     "SWANK thread ID table"))
