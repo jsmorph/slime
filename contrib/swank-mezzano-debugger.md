@@ -84,6 +84,7 @@ Stop information has this shape:
  :parent stop-token-or-nil
  :child stop-token-or-nil
  :generation integer
+ :current-frame integer-or-nil
  :next-command-id integer)
 ```
 
@@ -119,6 +120,12 @@ The example name and token are placeholders.
 | `:restarts` | `NIL` or omitted. | List of `(:index integer :name string :description string :default-p boolean)`. |
 | `:frames` | `NIL` or omitted. | List of `(:frame frame-token :function string)`, from the service activation toward older callers. |
 | `:locals` | A frame token from this stop. | List of `(:index integer :name string :available-p boolean :value string-or-nil)`. |
+| `:current-frame` | NIL or omitted. | Selected frame inspection: `(:index integer :function string :locals local-records)`. |
+| `:select-frame` | Nonnegative frame index. | Selects the absolute index and returns its inspection. |
+| `:next-frame` | Nonnegative count. | Moves toward older callers and returns the selected frame inspection. |
+| `:previous-frame` | Nonnegative count. | Moves toward newer callees and returns the selected frame inspection. |
+| `:top-frame` | NIL or omitted. | Selects index zero and returns its inspection. |
+| `:bottom-frame` | NIL or omitted. | Selects the oldest retained frame and returns its inspection. |
 | `:invoke-restart` | Restart index. | List of printed values if the restart returns to the command.  Invocation supplies zero arguments. |
 | `:invoke-restart-interactively` | Restart index. | List of printed values if the restart returns.  Its interactive function obtains arguments through QUERY-IO. |
 | `:invoke-restart-with-arguments` | Restart index, or NIL/omitted for default CONTINUE. | Prompts through QUERY-IO for one Lisp expression whose primary value is a finite proper argument list, evaluates it, and applies INVOKE-RESTART.  Returns a list of printed values if the restart returns. |
@@ -127,6 +134,10 @@ The example name and token are placeholders.
 | `:help` | NIL or omitted. | Guest debugger command descriptions as a string. |
 
 A printed Lisp `NIL` is the string `"NIL"`.  An unavailable local has `:available-p NIL` and `:value NIL`.  Restart names and local names are printed representations and can include package prefixes.  Local indices identify entries within that returned list.  The current API accepts frame tokens for inspection and exposes no local-write operation.
+
+Each stop owns its current-frame index, initially zero.  Closed stops report NIL.  Selection survives controller replacement and image restoration.  A nested stop has independent selection.  Movement changes the index on the target thread before printing.  If printing enters a child debugger, aborting that operation preserves the parent's selected index.  Local records have the same shape as :locals results.  :locals leaves selection unchanged.
+
+An invalid index, count, or out-of-range movement reports :invalid-frame before acceptance, preserving selection and the next command ID.  A zero movement count inspects the current frame.  Identical accepted relative-movement replay returns the original command without moving again.
 
 At most one restart has `:default-p T`: the first captured restart named CL:CONTINUE.  If no such restart exists, `:proceed` or default `:invoke-restart-with-arguments` rejects `:no-continue-restart` before acceptance and leaves the next command ID unchanged.  An explicit restart index can still be invoked.
 
@@ -284,6 +295,7 @@ The following reasons appear in `(:error reason)`.  Earlier validation can deter
 | `:stop-closed` | A new command targets a closed stop. |
 | `:stop-busy` | A pending command, active command, or child stop prevents a new command. |
 | `:unexpected-argument` | A no-argument debugger command received a non-NIL argument. |
+| `:invalid-frame` | The frame index, movement count, or resulting target is invalid. |
 | `:invalid-restart` | The command argument is outside the retained restart-index range. |
 | `:no-continue-restart` | Default Proceed has no captured CL:CONTINUE restart.  Select an explicit restart index. |
 | `:unknown-operation` | The submitted guest command operation is unsupported. |
