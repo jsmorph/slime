@@ -57,6 +57,11 @@ These functions are exported from `SWANK/MEZZANO-DEBUGGER`.
 | `open-session name` | The name of the newly created session. |
 | `resume-session name` | The name of the existing session attached to this connection. |
 | `request name operation &rest arguments` | The operation-specific value below. |
+| `transient-request name operation &rest arguments` | The operation-specific value, after detaching the session. |
+
+`transient-request` creates or resumes an attachment for one operation and releases its controller and connection association before replying.  It uses the same session lock and checks as the persistent APIs.  `:open-session` creates a session, and `:resume-session` verifies an existing session.  Both take no arguments and return its name.  All operations below are available except `:attach`.  Transient `:submit` and `:release-stop` take a **stop token** in place of the lease token and acquire control within the operation.  The adapter retains no token for that temporary lease.
+
+Cleanup runs on successful completion, typed rejection, and ordinary Lisp error.  A rejection before attachment preserves another client's controller.  Accepted commands continue after detachment, and session handles, Listener state, jobs, and command results persist.  A connection using this entry point can remain open between requests without holding debugger control.  The persistent APIs retain their existing attachment and lease lifetime.
 
 The attached connection sends `request` operations:
 
@@ -282,7 +287,8 @@ The following reasons appear in `(:error reason)`.  Earlier validation can deter
 | `:session-attached` | Another connection remains attached to the requested session. |
 | `:wrong-connection` | A request arrived through a connection other than the session's attached connection. |
 | `:invalid-handle` | The token's shape, kind, session, or table entry is invalid. |
-| `:unexpected-arguments` | Session release received arguments. |
+| `:unexpected-arguments` | Session release or transient open/resume received arguments. |
+| `:transient-attachment` | Transient requests cannot return a control lease through `:attach`. |
 | `:expired-stop` | The guest stop handle has the wrong kind or boot identity. |
 | `:released-stop` | The guest stop record has been removed. |
 | `:expired-controller` | The controller has the wrong kind, was closed, or belongs to an earlier boot. |
@@ -376,4 +382,8 @@ SUBMIT accepts :ABORT and :HELP without arguments.  :ABORT invokes the innermost
 
 Stop information includes one-based :DEPTH and the nesting :PROMPT.  LISTENER-INFORMATION and MONITOR-STATE's :LISTENER include :DEBUGGER.  Its value is NIL when the Listener has no retained stop, or a property list containing :STOP (a typed stop token), :DEPTH, and :PROMPT for the innermost stop belonging to its active job.  The guest selects that stop under the service lock.
 
-For interactive evaluations, restart argument readers use retained QUERY-IO, and JOB-INPUT supplies their input.  The debugger command remains :RUNNING during the read.  Conditions in the reader enter child stops.  Required arguments without an interactive function need explicit argument invocation, which remains planned.
+For interactive evaluations, restart argument readers use retained QUERY-IO, and JOB-INPUT supplies their input.  The debugger command remains :RUNNING during the read.  Conditions in the reader enter child stops.  :INVOKE-RESTART-WITH-ARGUMENTS reads and evaluates a Lisp expression returning the argument list, including when the restart has no interactive function.
+
+## Transient ownership tests
+
+Compile and load `contrib/swank-mezzano-transient-test.lisp` in Mezzano, then call `swank-mezzano-transient-test:run`.  The fixture uses a private adapter session registry and simulated registered connections, plus one real retained evaluation and condition stop.  It checks persistent ownership, transient detachment after results and errors, another client's attachment and stop lease, command replay, absence of temporary lease tokens, completion after detachment, and explicit release.  Its cleanup releases only its own evaluation and stop.  The Web server's live HTTP and browser suites separately exercise real SWANK connections.

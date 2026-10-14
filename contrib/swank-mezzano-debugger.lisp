@@ -61,9 +61,16 @@
 (defun attach-session (session)
   (when (session-connection session)
     (reject :session-attached))
-  (setf (session-connection session) swank::*emacs-connection*
-        (session-controller session) (mezzano.debug:make-debugger-controller))
-  (session-name session))
+  (let ((controller (mezzano.debug:make-debugger-controller)))
+    (setf (session-connection session) swank::*emacs-connection*
+          (session-controller session) controller))
+  session)
+
+(defun detach-session (session)
+  (when (session-controller session)
+    (mezzano.debug:close-debugger-controller (session-controller session)))
+  (setf (session-connection session) nil
+        (session-controller session) nil))
 
 (defun close-session-connection (connection)
   (with-lock
@@ -71,33 +78,36 @@
      (lambda (name session)
        (declare (ignore name))
        (when (eq (session-connection session) connection)
-         (mezzano.debug:close-debugger-controller (session-controller session))
-         (setf (session-connection session) nil
-               (session-controller session) nil)))
+         (detach-session session)))
      *sessions*)))
+
+(defun create-session (name)
+  (unless (and (stringp name) (= (length name) 64)
+               (every (lambda (char) (find char "0123456789abcdef")) name))
+    (reject :invalid-session-name))
+  (when (gethash name *sessions*) (reject :session-name-used))
+  (check-connection)
+  (let ((session (make-session
+                  :name (copy-seq name)
+                  :boot (mezzano.supervisor:current-boot-id))))
+    (attach-session session)
+    (setf (gethash (session-name session) *sessions*) session)))
+
+(defun reconnect-session (name)
+  (check-connection)
+  (attach-session (current-session name)))
 
 (swank::defslimefun open-session (name)
   "Create a session with a fresh client-generated 256-bit hexadecimal name."
   (reply
     (with-lock
-      (unless (and (stringp name) (= (length name) 64)
-                   (every (lambda (char) (find char "0123456789abcdef")) name))
-        (reject :invalid-session-name))
-      (when (gethash name *sessions*) (reject :session-name-used))
-      (check-connection)
-      (let ((session (make-session
-                      :name (copy-seq name)
-                      :boot (mezzano.supervisor:current-boot-id))))
-        (attach-session session)
-        (setf (gethash (session-name session) *sessions*) session)
-        (session-name session)))))
+      (session-name (create-session name)))))
 
 (swank::defslimefun resume-session (name)
   "Attach this connection to a session from the current boot."
   (reply
     (with-lock
-      (check-connection)
-      (attach-session (current-session name)))))
+      (session-name (reconnect-session name)))))
 
 (defun encode-handle (session kind object)
   (when object
@@ -160,11 +170,8 @@
     result))
 
 (defun release-session (session)
-  (when (session-controller session)
-    (mezzano.debug:close-debugger-controller (session-controller session)))
+  (detach-session session)
   (setf (session-released-p session) t
-        (session-connection session) nil
-        (session-controller session) nil
         (session-listener session) nil)
   (clrhash (session-handles session))
   (clrhash (session-objects session))
@@ -269,7 +276,13 @@
             :stops (remove nil (mapcar (lambda (handle) (monitor-stop session handle))
                                       (mezzano.debug:debugger-stops :include-closed t)))))))
 
-(defun dispatch (session operation arguments)
+(defun control-lease (session token transient-p)
+  (if transient-p
+      (mezzano.debug:attach-debugger-stop
+       (decode-handle session :stop token) (session-controller session))
+      (decode-handle session :lease token)))
+
+(defun dispatch (session operation arguments &optional transient-p)
   (ecase operation
     (:monitor-state
      (destructuring-bind (&optional offsets) arguments
@@ -285,6 +298,7 @@
      (destructuring-bind (token) arguments
        (stop-information session (decode-handle session :stop token))))
     (:attach
+     (when transient-p (reject :transient-attachment))
      (destructuring-bind (token) arguments
        (encode-handle
         session :lease
@@ -293,7 +307,7 @@
     (:submit
      (destructuring-bind (token id operation &optional argument) arguments
        (mezzano.debug:submit-debugger-command
-        (decode-handle session :lease token) id operation
+        (control-lease session token transient-p) id operation
         (if (eq operation :locals)
             (decode-handle session :frame argument)
             argument))))
@@ -302,7 +316,7 @@
        (command-result session (decode-handle session :stop token) id)))
     (:release-stop
      (destructuring-bind (token) arguments
-       (mezzano.debug:release-debugger-stop (decode-handle session :lease token))
+       (mezzano.debug:release-debugger-stop (control-lease session token transient-p))
        nil))
     (:start-evaluation
      (destructuring-bind (name source &key (package "CL-USER") (input "") interactive) arguments
@@ -372,6 +386,21 @@
         (unless (eq (session-connection session) swank::*emacs-connection*)
           (reject :wrong-connection))
         (dispatch session operation arguments)))))
+
+(swank::defslimefun transient-request (name operation &rest arguments)
+  "Perform one operation, releasing its session attachment before replying."
+  (reply
+    (with-lock
+      (when (and (member operation '(:open-session :resume-session)) arguments)
+        (reject :unexpected-arguments))
+      (let ((session (if (eq operation :open-session)
+                         (create-session name)
+                         (reconnect-session name))))
+        (unwind-protect
+             (if (member operation '(:open-session :resume-session))
+                 (session-name session)
+                 (dispatch session operation arguments t))
+          (detach-session session))))))
 
 (pushnew 'close-session-connection swank::*connection-closed-hook*)
 
