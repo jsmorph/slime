@@ -121,6 +121,7 @@ The example name and token are placeholders.
 
 | Command operation | Argument | Result when state is `:returned` |
 |---|---|---|
+| `:evaluate` | Source string containing one Lisp form. | List of printed values from evaluation in the selected frame. |
 | `:condition` | `NIL` or omitted. | Printed condition string. |
 | `:restarts` | `NIL` or omitted. | List of `(:index integer :name string :description string :default-p boolean)`. |
 | `:frames` | `NIL` or omitted. | List of `(:frame frame-token :function string)`, from the service activation toward older callers. |
@@ -138,7 +139,11 @@ The example name and token are placeholders.
 | `:proceed` | NIL or omitted. | Invokes the first captured CL:CONTINUE restart interactively.  A returning restart supplies printed values. |
 | `:help` | NIL or omitted. | Guest debugger command descriptions as a string. |
 
-A printed Lisp `NIL` is the string `"NIL"`.  An unavailable local has `:available-p NIL` and `:value NIL`.  Restart names and local names are printed representations and can include package prefixes.  Local indices identify entries within that returned list.  The current API accepts frame tokens for inspection and exposes no local-write operation.
+A printed Lisp `NIL` is the string `"NIL"`.  An unavailable local has `:available-p NIL` and `:value NIL`.  Restart names and local names are printed representations and can include package prefixes.  Local indices identify entries within that returned list.  The current API accepts frame tokens for inspection and evaluates expressions against the selected frame.  Assignment within an expression writes its live binding.
+
+EVALUATE copies its accepted source.  Reading binds `*READ-EVAL*` to `NIL` and requires exactly one form.  Execution uses the stopped thread's package and dynamic bindings.  Lexical lookup includes variables, local functions, symbol macros, and local macros.  Writes check source declarations and storage types.  Each stop owns separate standard expression/value histories.  Reader, evaluator, printer, unavailable-scope, and unavailable-binding conditions enter a child debugger.  Its command ABORT abandons the expression.
+
+A nonstring argument rejects :INVALID-SOURCE before acceptance.  Unavailable lexical metadata reports :UNAVAILABLE-LEXICAL-SCOPE during execution, and missing binding storage reports :UNAVAILABLE-BINDING.  Unsupported source BLOCK/GO transfer reports :UNAVAILABLE-CONTROL-TARGET.  Frame-backed closures require an active reference on the owning thread.  Another thread reports :FOREIGN-FRAME-THREAD, and expired references retain the ordinary stop/frame errors.  See the [frame-evaluation reference](https://github.com/jsmorph/Mezzano/blob/debugging/doc/debugger.md#frame-evaluation).
 
 Each stop owns its current-frame index, initially zero.  Closed stops report NIL.  Selection survives controller replacement and image restoration.  A nested stop has independent selection.  Movement changes the index on the target thread before printing.  If printing enters a child debugger, aborting that operation preserves the parent's selected index.  Local records have the same shape as :locals results.  :locals leaves selection unchanged.
 
@@ -154,7 +159,7 @@ Printing runs on the stopped thread and can enter a child stop.  The parent rema
 
 ### Reconnection and duplicate submission
 
-After a lost reply, resume the session, reacquire control, and query the original command ID.  Repeating an accepted submission in the same boot returns its ID without executing it again if the operation and argument match.  Guest comparison uses `EQ` for the operation and `EQL` for the argument.  For `:locals`, the original token must resolve to the original frame-reference object.
+After a lost reply, resume the session, reacquire control, and query the original command ID.  Repeating an accepted submission in the same boot returns its ID without executing it again if the operation and argument match.  Guest comparison uses `EQ` for the operation, `EQUAL` for an `:evaluate` source string, and `EQL` for other arguments.  For `:locals`, the original token must resolve to the original frame-reference object.
 
 Duplicate recognition still requires a valid lease.  A new command uses `:next-command-id`, and a busy stop rejects it.  Closed stops retain outcomes and recognize matching prior submissions until explicit release.
 
