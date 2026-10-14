@@ -121,13 +121,16 @@ The example name and token are placeholders.
 | `:locals` | A frame token from this stop. | List of `(:index integer :name string :available-p boolean :value string-or-nil)`. |
 | `:invoke-restart` | Restart index. | List of printed values if the restart returns to the command.  Invocation supplies zero arguments. |
 | `:invoke-restart-interactively` | Restart index. | List of printed values if the restart returns.  Its interactive function obtains arguments through QUERY-IO. |
+| `:invoke-restart-with-arguments` | Restart index, or NIL/omitted for default CONTINUE. | Prompts through QUERY-IO for one Lisp expression whose primary value is a finite proper argument list, evaluates it, and applies INVOKE-RESTART.  Returns a list of printed values if the restart returns. |
 | `:abort` | NIL or omitted. | Invokes the innermost captured CL:ABORT restart.  A returning restart supplies printed values. |
 | `:proceed` | NIL or omitted. | Invokes the first captured CL:CONTINUE restart interactively.  A returning restart supplies printed values. |
 | `:help` | NIL or omitted. | Guest debugger command descriptions as a string. |
 
 A printed Lisp `NIL` is the string `"NIL"`.  An unavailable local has `:available-p NIL` and `:value NIL`.  Restart names and local names are printed representations and can include package prefixes.  Local indices identify entries within that returned list.  The current API accepts frame tokens for inspection and exposes no local-write operation.
 
-At most one restart has `:default-p T`: the first captured restart named CL:CONTINUE.  If no such restart exists, `:proceed` rejects `:no-continue-restart` before acceptance and leaves the next command ID unchanged.  An explicit restart index can still be invoked.
+At most one restart has `:default-p T`: the first captured restart named CL:CONTINUE.  If no such restart exists, `:proceed` or default `:invoke-restart-with-arguments` rejects `:no-continue-restart` before acceptance and leaves the next command ID unchanged.  An explicit restart index can still be invoked.
+
+Explicit argument expressions read with `*READ-EVAL*` NIL and evaluate on the stopped thread in its current dynamic environment and a null lexical environment.  NIL supplies zero arguments.  The selected restart requires no interactive function for this operation.  Reader, evaluation, malformed-list, and invocation errors enter a child debugger under the command's ABORT restart.  The expression uses the existing retained input stream and offsets.  Replaying an accepted command or already supplied input does not invoke it again.
 
 A nonlocal restart exit produces `:unwound`.  The application result must be observed separately.  `:pending` and `:running` indicate incomplete execution.  `:cancelled` and `:expired` are terminal states with no operation result.  A `NIL` result alone is insufficient to determine command state.
 
