@@ -16,6 +16,8 @@ On 2026-10-12, the user authorized the entire debugger, headless-system, and QEM
 
 This authorization supersedes the earlier requirement for separate user approval of each design decision within this agenda.  Essential missing information still requires a question.  Ask one question at a time, with a recommendation.
 
+The authorized agenda continues across increments, commits, restarts, and compactions.  After testing and committing an increment, proceed to the next unfinished item.  End agenda work when its requirements are satisfied or when the user directs a pause.
+
 Bare-metal FEP work remains deferred.
 
 ## Implementation and reporting
