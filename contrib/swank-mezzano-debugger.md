@@ -41,6 +41,8 @@ Tokens are proper three-element lists:
 (:stop session-name integer)
 (:lease session-name integer)
 (:frame session-name integer)
+(:object session-name integer)
+(:part session-name integer)
 (:job session-name integer)
 ```
 
@@ -121,6 +123,10 @@ The example name and token are placeholders.
 
 | Command operation | Argument | Result when state is `:returned` |
 |---|---|---|
+| `:inspect` | NIL, or (object-token start count). | Inspector page described below. |
+| `:modify` | (part-token start count). | Page after storing the primary value of an expression read through QUERY-IO. |
+| `:describe-object` | Object token or NIL. | DESCRIBE output string. |
+| `:clear-inspection` | NIL or omitted. | NIL after releasing retained inspection references. |
 | `:evaluate` | Source string containing one Lisp form. | List of printed values from evaluation in the selected frame. |
 | `:condition` | `NIL` or omitted. | Printed condition string. |
 | `:restarts` | `NIL` or omitted. | List of `(:index integer :name string :description string :default-p boolean)`. |
@@ -151,15 +157,38 @@ An invalid index, count, or out-of-range movement reports :invalid-frame before 
 
 At most one restart has `:default-p T`: the first captured restart named CL:CONTINUE.  If no such restart exists, `:proceed` or default `:invoke-restart-with-arguments` rejects `:no-continue-restart` before acceptance and leaves the next command ID unchanged.  An explicit restart index can still be invoked.
 
-Explicit argument expressions read with `*READ-EVAL*` NIL and evaluate on the stopped thread in its current dynamic environment and a null lexical environment.  NIL supplies zero arguments.  The selected restart requires no interactive function for this operation.  Reader, evaluation, malformed-list, and invocation errors enter a child debugger under the command's ABORT restart.  The expression uses the existing retained input stream and offsets.  Replaying an accepted command or already supplied input does not invoke it again.
+Explicit argument expressions read with `*READ-EVAL*` NIL and evaluate on the stopped thread in its current dynamic environment and a null lexical environment.  NIL supplies zero arguments.  The selected restart requires no interactive function for this operation.  Reader, evaluation, malformed-list, and invocation errors enter a child debugger under the command's ABORT restart.  The expression uses the existing retained input stream and offsets.  If its read unwinds, cleanup clears buffered input while preserving the accepted-input record.  Replaying an accepted command or already supplied input does not invoke it again.
 
 A nonlocal restart exit produces `:unwound`.  The application result must be observed separately.  `:pending` and `:running` indicate incomplete execution.  `:cancelled` and `:expired` are terminal states with no operation result.  A `NIL` result alone is insufficient to determine command state.
 
 Printing runs on the stopped thread and can enter a child stop.  The parent remains busy until the child resolves.  The protocol currently requires polling to discover command completion and child stops.
 
+### Inspector commands
+
+`:inspect` accepts NIL for the primary evaluation-history value, or `(object-token start count)`.  `:modify` accepts `(part-token start count)`.  Start is a nonnegative integer.  Count ranges from 1 through 64.  NIL inspection uses start 0 and count 32.
+
+Both operations return a property list:
+
+```lisp
+(:object object-token :title string :type string
+ :start integer :end integer :total integer :count integer
+ :parts ((:label string :bound-p boolean :value string-or-nil
+          :object object-token-or-nil :part part-token-or-nil) ...))
+```
+
+End is exclusive.  Count is the requested page size.  Start clamps to the observed total when the container shrinks.  Each bound value, including NIL, has an object token.  An unbound component has NIL for :VALUE and :OBJECT.  A writable component has a part token.
+
+Modify reads its expression through the evaluation job's existing input stream, evaluates it in the selected frame, stores its primary value, and returns a fresh page.  It uses the same command IDs, retained input offsets, nested debugger, and replay rules as other debugger operations.  A successful store survives a later printer error.  Replaying that command ID preserves its recorded outcome.
+
+`:describe-object` accepts an object token or NIL for the primary history value and returns the DESCRIBE output as a string.  `:clear-inspection` accepts NIL and releases the stop's inspection values and places.  It returns NIL.  Recorded command text remains available.  Evaluation history can retain the same values independently.
+
+The adapter validates token kind and session membership.  The guest then validates stop, generation, boot, and retained ID.  Invalid ranges reject with :INVALID-INSPECTION-RANGE before command acceptance.  A cleared reference rejects with :RELEASED-INSPECTION-REFERENCE.  A wrong stop, kind, or closed generation rejects with :EXPIRED-INSPECTION-REFERENCE.  Old-boot handles reject with :EXPIRED-STOP, and released stops reject with :RELEASED-STOP.  Stale component places and newly read-only places signal :EXPIRED-INSPECTION-PART and :READ-ONLY-INSPECTION-PART during execution.
+
+Inspect and Modify copy their three-element arguments on acceptance and compare replayed lists with EQUAL.  Object and part references in those lists must be the same guest references.  Describe compares its reference with EQL.  Result records contain printed data and opaque references.  Raw objects and place descriptors reside in the stop's retention tables.
+
 ### Reconnection and duplicate submission
 
-After a lost reply, resume the session, reacquire control, and query the original command ID.  Repeating an accepted submission in the same boot returns its ID without executing it again if the operation and argument match.  Guest comparison uses `EQ` for the operation, `EQUAL` for an `:evaluate` source string, and `EQL` for other arguments.  For `:locals`, the original token must resolve to the original frame-reference object.
+After a lost reply, resume the session, reacquire control, and query the original command ID.  Repeating an accepted submission in the same boot returns its ID without executing it again if the operation and argument match.  Guest comparison uses `EQ` for the operation, `EQUAL` for an `:evaluate` source string or an `:inspect`/`:modify` argument list, and `EQL` for other arguments.  For `:locals`, the original token must resolve to the original frame-reference object.
 
 Duplicate recognition still requires a valid lease.  A new command uses `:next-command-id`, and a busy stop rejects it.  Closed stops retain outcomes and recognize matching prior submissions until explicit release.
 

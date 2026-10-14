@@ -163,10 +163,18 @@
 
 (defun command-result (session handle id)
   (let ((result (mezzano.debug:debugger-command-result handle id)))
-    (when (eq (getf result :operation) :frames)
-      (dolist (entry (getf result :result))
-        (setf (getf entry :frame)
-              (encode-handle session :frame (getf entry :frame)))))
+    (case (getf result :operation)
+      (:frames
+       (dolist (entry (getf result :result))
+         (setf (getf entry :frame)
+               (encode-handle session :frame (getf entry :frame)))))
+      ((:inspect :modify)
+       (when (eq (getf result :state) :returned)
+         (let ((page (getf result :result)))
+           (setf (getf page :object) (encode-handle session :object (getf page :object)))
+           (dolist (part (getf page :parts))
+             (setf (getf part :object) (encode-handle session :object (getf part :object))
+                   (getf part :part) (encode-handle session :part (getf part :part))))))))
     result))
 
 (defun release-session (session)
@@ -308,9 +316,17 @@
      (destructuring-bind (token id operation &optional argument) arguments
        (mezzano.debug:submit-debugger-command
         (control-lease session token transient-p) id operation
-        (if (eq operation :locals)
-            (decode-handle session :frame argument)
-            argument))))
+        (case operation
+          (:locals (decode-handle session :frame argument))
+          (:describe-object (when argument (decode-handle session :object argument)))
+          ((:inspect :modify)
+           (when argument
+             (unless (typep argument '(cons t (cons t (cons t null))))
+               (reject :invalid-inspection-range))
+             (list (decode-handle session (if (eq operation :modify) :part :object)
+                                  (first argument))
+                   (second argument) (third argument))))
+          (otherwise argument)))))
     (:result
      (destructuring-bind (token id) arguments
        (command-result session (decode-handle session :stop token) id)))
