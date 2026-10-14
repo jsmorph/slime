@@ -132,6 +132,7 @@ The example name and token are placeholders.
 | `:restarts` | `NIL` or omitted. | List of `(:index integer :name string :description string :default-p boolean)`. |
 | `:frames` | `NIL` or omitted. | List of `(:frame frame-token :function string)`, from the service activation toward older callers. |
 | `:locals` | A frame token from this stop. | List of `(:index integer :name string :available-p boolean :value string-or-nil)`. |
+| `:bindings` | NIL, or (all-p matching-string), where all-p is NIL or T. | Formatted special bindings established by the selected frame or all retained frames. |
 | `:arglist` | NIL or omitted. | String describing the selected executing function's stored lambda list, or explicitly reporting unavailable metadata. |
 | `:current-frame` | NIL or omitted. | Selected frame inspection: `(:index integer :function string :locals local-records)`. |
 | `:select-frame` | Nonnegative frame index. | Selects the absolute index and returns its inspection. |
@@ -153,6 +154,8 @@ EVALUATE copies its accepted source.  Reading binds `*READ-EVAL*` to `NIL` and r
 A nonstring argument rejects :INVALID-SOURCE before acceptance.  Unavailable lexical metadata reports :UNAVAILABLE-LEXICAL-SCOPE during execution, and missing binding storage reports :UNAVAILABLE-BINDING.  Unsupported source BLOCK/GO transfer reports :UNAVAILABLE-CONTROL-TARGET.  Frame-backed closures require an active reference on the owning thread.  Another thread reports :FOREIGN-FRAME-THREAD, and expired references retain the ordinary stop/frame errors.  See the [frame-evaluation reference](https://github.com/jsmorph/Mezzano/blob/debugging/doc/debugger.md#frame-evaluation).
 
 ARGLIST reads the executing compiled function's metadata, preserving the active version after redefinition.  An empty lambda list prints NIL.  Missing metadata produces an unavailable message.  The operation preserves selection and expression/value history.
+
+BINDINGS matches a case-sensitive literal substring of SYMBOL-NAME.  NIL means selected frame with an empty filter.  The service copies the matching string and compares accepted arguments with EQUAL for replay.  Malformed options reject :INVALID-BINDING-OPTIONS before acceptance.  It preserves selection and expression/value history.  Bound NIL prints NIL, and an unbound cell prints [unbound].  Repeated bindings remain visible in inner-to-outer order.  The implementation supports established x86-64 condition-stop frames and reports unsupported frame layouts as unavailable.  A printer condition enters a child debugger under the command's ABORT restart.
 
 Each stop owns its current-frame index, initially zero.  Closed stops report NIL.  Selection survives controller replacement and image restoration.  A nested stop has independent selection.  Movement changes the index on the target thread before printing.  If printing enters a child debugger, aborting that operation preserves the parent's selected index.  Local records have the same shape as :locals results.  :locals leaves selection unchanged.
 
