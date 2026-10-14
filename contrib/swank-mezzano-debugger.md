@@ -116,15 +116,18 @@ The example name and token are placeholders.
 | Command operation | Argument | Result when state is `:returned` |
 |---|---|---|
 | `:condition` | `NIL` or omitted. | Printed condition string. |
-| `:restarts` | `NIL` or omitted. | List of `(:index integer :name string :description string)`. |
+| `:restarts` | `NIL` or omitted. | List of `(:index integer :name string :description string :default-p boolean)`. |
 | `:frames` | `NIL` or omitted. | List of `(:frame frame-token :function string)`, from the service activation toward older callers. |
 | `:locals` | A frame token from this stop. | List of `(:index integer :name string :available-p boolean :value string-or-nil)`. |
 | `:invoke-restart` | Restart index. | List of printed values if the restart returns to the command.  Invocation supplies zero arguments. |
 | `:invoke-restart-interactively` | Restart index. | List of printed values if the restart returns.  Its interactive function obtains arguments through QUERY-IO. |
 | `:abort` | NIL or omitted. | Invokes the innermost captured CL:ABORT restart.  A returning restart supplies printed values. |
+| `:proceed` | NIL or omitted. | Invokes the first captured CL:CONTINUE restart interactively.  A returning restart supplies printed values. |
 | `:help` | NIL or omitted. | Guest debugger command descriptions as a string. |
 
 A printed Lisp `NIL` is the string `"NIL"`.  An unavailable local has `:available-p NIL` and `:value NIL`.  Restart names and local names are printed representations and can include package prefixes.  Local indices identify entries within that returned list.  The current API accepts frame tokens for inspection and exposes no local-write operation.
+
+At most one restart has `:default-p T`: the first captured restart named CL:CONTINUE.  If no such restart exists, `:proceed` rejects `:no-continue-restart` before acceptance and leaves the next command ID unchanged.  An explicit restart index can still be invoked.
 
 A nonlocal restart exit produces `:unwound`.  The application result must be observed separately.  `:pending` and `:running` indicate incomplete execution.  `:cancelled` and `:expired` are terminal states with no operation result.  A `NIL` result alone is insufficient to determine command state.
 
@@ -279,6 +282,7 @@ The following reasons appear in `(:error reason)`.  Earlier validation can deter
 | `:stop-busy` | A pending command, active command, or child stop prevents a new command. |
 | `:unexpected-argument` | A no-argument debugger command received a non-NIL argument. |
 | `:invalid-restart` | The command argument is outside the retained restart-index range. |
+| `:no-continue-restart` | Default Proceed has no captured CL:CONTINUE restart.  Select an explicit restart index. |
 | `:unknown-operation` | The submitted guest command operation is unsupported. |
 | `:unknown-command` | No command with that ID is recorded for the stop. |
 | `:invalid-job-name` | A job name does not have the required format. |
