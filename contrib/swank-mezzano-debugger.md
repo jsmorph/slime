@@ -132,6 +132,7 @@ The example name and token are placeholders.
 | `:restarts` | `NIL` or omitted. | List of `(:index integer :name string :description string :default-p boolean)`. |
 | `:frames` | `NIL` or omitted. | List of `(:frame frame-token :function string)`, from the service activation toward older callers. |
 | `:locals` | A frame token from this stop. | List of `(:index integer :name string :available-p boolean :value string-or-nil)`. |
+| `:handlers` | NIL for selected frame, or T for all retained frames. | Formatted condition types, handler functions, and active/inactive state at debugger entry. |
 | `:bindings` | NIL, or (all-p matching-string), where all-p is NIL or T. | Formatted special bindings established by the selected frame or all retained frames. |
 | `:arglist` | NIL or omitted. | String describing the selected executing function's stored lambda list, or explicitly reporting unavailable metadata. |
 | `:current-frame` | NIL or omitted. | Selected frame inspection: `(:index integer :function string :locals local-records)`. |
@@ -158,6 +159,8 @@ ARGLIST reads the executing compiled function's metadata, preserving the active 
 BINDINGS matches a case-sensitive literal substring of SYMBOL-NAME.  NIL means selected frame with an empty filter.  The service copies the matching string and compares accepted arguments with EQUAL for replay.  Malformed options reject :INVALID-BINDING-OPTIONS before acceptance.  It preserves selection and expression/value history.  Bound NIL prints NIL, and an unbound cell prints [unbound].  Repeated bindings remain visible in inner-to-outer order.  The implementation supports established x86-64 condition-stop frames and reports unsupported frame layouts as unavailable.  A printer condition enters a child debugger under the command's ABORT restart.
 
 The retained service disables application condition handlers during command execution, including printers, input, and restart functions.  Handlers established by the command's evaluated form or called function work normally.  Unhandled conditions enter a child debugger.  Leaving the debugger restores the application's handlers before older application cleanup runs.
+
+HANDLERS lists clusters established by the selected frame or all retained frames.  It distinguishes SIGNAL's temporary deactivation from a new binding, preserving cluster identity and source order.  It reports the program's active state at debugger entry even though command execution disables application handlers.  Invalid options reject :INVALID-HANDLER-OPTIONS before acceptance.  Replay compares the Boolean argument with EQL.  Selection and expression/value history remain unchanged.  Established x86-64 frames are supported; unsupported layouts report unavailable locations.  A printer condition enters a child debugger under the command's ABORT restart.
 
 Each stop owns its current-frame index, initially zero.  Closed stops report NIL.  Selection survives controller replacement and image restoration.  A nested stop has independent selection.  Movement changes the index on the target thread before printing.  If printing enters a child debugger, aborting that operation preserves the parent's selected index.  Local records have the same shape as :locals results.  :locals leaves selection unchanged.
 
