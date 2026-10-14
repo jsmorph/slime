@@ -135,6 +135,9 @@ The example name and token are placeholders.
 | `:catches` | NIL for selected frame, or T for all retained frames. | Formatted active catch tags and available destination functions and hexadecimal byte offsets. |
 | `:handlers` | NIL for selected frame, or T for all retained frames. | Formatted condition types, handler functions, and active/inactive state at debugger entry. |
 | `:bindings` | NIL, or (all-p matching-string), where all-p is NIL or T. | Formatted special bindings established by the selected frame or all retained frames. |
+| `:function` | NIL or omitted. | Printed associated function after assigning the debugger level's * value. |
+| `:compiled-code` | NIL or omitted. | Complete selected executing-function disassembly as a string. |
+| `:instruction` | NIL or omitted. | Selected instruction as a string, with saved-caller or interrupted-PC header, or an unavailable message. |
 | `:arglist` | NIL or omitted. | String describing the selected executing function's stored lambda list, or explicitly reporting unavailable metadata. |
 | `:current-frame` | NIL or omitted. | Selected frame inspection: `(:index integer :function string :locals local-records)`. |
 | `:select-frame` | Nonnegative frame index. | Selects the absolute index and returns its inspection. |
@@ -154,6 +157,10 @@ A printed Lisp `NIL` is the string `"NIL"`.  An unavailable local has `:availabl
 EVALUATE copies its accepted source.  Reading binds `*READ-EVAL*` to `NIL` and requires exactly one form.  Execution uses the stopped thread's package and dynamic bindings, with the program's condition handlers disabled during command execution.  Lexical lookup includes variables, local functions, symbol macros, and local macros.  Writes check source declarations and storage types.  Each stop owns separate standard expression/value histories.  Reader, evaluator, printer, unavailable-scope, and unavailable-binding conditions enter a child debugger.  Its command ABORT abandons the expression.
 
 A nonstring argument rejects :INVALID-SOURCE before acceptance.  Unavailable lexical metadata reports :UNAVAILABLE-LEXICAL-SCOPE during execution, and missing binding storage reports :UNAVAILABLE-BINDING.  Unsupported source BLOCK/GO transfer reports :UNAVAILABLE-CONTROL-TARGET.  Frame-backed closures require an active reference on the owning thread.  Another thread reports :FOREIGN-FRAME-THREAD, and expired references retain the ordinary stop/frame errors.  See the [frame-evaluation reference](https://github.com/jsmorph/Mezzano/blob/debugging/doc/debugger.md#frame-evaluation).
+
+FUNCTION assigns only the level's * history slot before printing its associated function.  The assignment survives printer Abort.  Selection and the other eight history slots remain unchanged.  A generated discriminator can report its associated generic function.  Genera's + locative assignment remains unsupported.
+
+COMPILED-CODE and INSTRUCTION resolve the executing function from the retained frame PC, preserving an active definition after redefinition.  COMPILED-CODE returns the complete code with labels, hexadecimal object-relative byte offsets, instruction bytes, and annotations.  INSTRUCTION resolves the decoded span containing the saved return-PC-minus-one or exact interrupted PC and labels that distinction.  Missing locations and undecoded bytes remain explicit.  These operations preserve selection and all history.  All three operations reject non-NIL arguments with :UNEXPECTED-ARGUMENT before acceptance and compare replay arguments with EQL.  Printers run under the existing command ABORT boundary.  Explicit function/range arguments and other Genera code-display options remain unsupported.  See the [function and instruction reference](https://github.com/jsmorph/Mezzano/blob/debugging/doc/debugger.md#functions-and-instructions) for tested stopping states and invalid-argument helper identity.
 
 ARGLIST reads the executing compiled function's metadata, preserving the active version after redefinition.  An empty lambda list prints NIL.  Missing metadata produces an unavailable message.  The operation preserves selection and expression/value history.
 
@@ -179,7 +186,7 @@ Printing runs on the stopped thread and can enter a child stop.  The parent rema
 
 ### Inspector commands
 
-`:inspect` accepts NIL for the primary evaluation-history value, or `(object-token start count)`.  `:modify` accepts `(part-token start count)`.  Start is a nonnegative integer.  Count ranges from 1 through 64.  NIL inspection uses start 0 and count 32.
+`:inspect` accepts NIL for the debugger level's * value, or `(object-token start count)`.  `:modify` accepts `(part-token start count)`.  Start is a nonnegative integer.  Count ranges from 1 through 64.  NIL inspection uses start 0 and count 32.
 
 Both operations return a property list:
 
@@ -194,7 +201,7 @@ End is exclusive.  Count is the requested page size.  Start clamps to the observ
 
 Modify reads its expression through the evaluation job's existing input stream, evaluates it in the selected frame, stores its primary value, and returns a fresh page.  It uses the same command IDs, retained input offsets, nested debugger, and replay rules as other debugger operations.  A successful store survives a later printer error.  Replaying that command ID preserves its recorded outcome.
 
-`:describe-object` accepts an object token or NIL for the primary history value and returns the DESCRIBE output as a string.  `:clear-inspection` accepts NIL and releases the stop's inspection values and places.  It returns NIL.  Recorded command text remains available.  Evaluation history can retain the same values independently.
+`:describe-object` accepts an object token or NIL for the debugger level's * value and returns the DESCRIBE output as a string.  `:clear-inspection` accepts NIL and releases the stop's inspection values and places.  It returns NIL.  Recorded command text remains available.  Evaluation history can retain the same values independently.
 
 The adapter validates token kind and session membership.  The guest then validates stop, generation, boot, and retained ID.  Invalid ranges reject with :INVALID-INSPECTION-RANGE before command acceptance.  A cleared reference rejects with :RELEASED-INSPECTION-REFERENCE.  A wrong stop, kind, or closed generation rejects with :EXPIRED-INSPECTION-REFERENCE.  Old-boot handles reject with :EXPIRED-STOP, and released stops reject with :RELEASED-STOP.  Stale component places and newly read-only places signal :EXPIRED-INSPECTION-PART and :READ-ONLY-INSPECTION-PART during execution.
 
