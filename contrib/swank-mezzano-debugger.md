@@ -132,6 +132,7 @@ The example name and token are placeholders.
 | `:restarts` | `NIL` or omitted. | List of `(:index integer :name string :description string :default-p boolean)`. |
 | `:frames` | `NIL` or omitted. | List of `(:frame frame-token :function string)`, from the service activation toward older callers. |
 | `:locals` | A frame token from this stop. | List of `(:index integer :name string :available-p boolean :value string-or-nil)`. |
+| `:arglist` | NIL or omitted. | String describing the selected executing function's stored lambda list, or explicitly reporting unavailable metadata. |
 | `:current-frame` | NIL or omitted. | Selected frame inspection: `(:index integer :function string :locals local-records)`. |
 | `:select-frame` | Nonnegative frame index. | Selects the absolute index and returns its inspection. |
 | `:next-frame` | Nonnegative count. | Moves toward older callers and returns the selected frame inspection. |
@@ -150,6 +151,8 @@ A printed Lisp `NIL` is the string `"NIL"`.  An unavailable local has `:availabl
 EVALUATE copies its accepted source.  Reading binds `*READ-EVAL*` to `NIL` and requires exactly one form.  Execution uses the stopped thread's package and dynamic bindings.  Lexical lookup includes variables, local functions, symbol macros, and local macros.  Writes check source declarations and storage types.  Each stop owns separate standard expression/value histories.  Reader, evaluator, printer, unavailable-scope, and unavailable-binding conditions enter a child debugger.  Its command ABORT abandons the expression.
 
 A nonstring argument rejects :INVALID-SOURCE before acceptance.  Unavailable lexical metadata reports :UNAVAILABLE-LEXICAL-SCOPE during execution, and missing binding storage reports :UNAVAILABLE-BINDING.  Unsupported source BLOCK/GO transfer reports :UNAVAILABLE-CONTROL-TARGET.  Frame-backed closures require an active reference on the owning thread.  Another thread reports :FOREIGN-FRAME-THREAD, and expired references retain the ordinary stop/frame errors.  See the [frame-evaluation reference](https://github.com/jsmorph/Mezzano/blob/debugging/doc/debugger.md#frame-evaluation).
+
+ARGLIST reads the executing compiled function's metadata, preserving the active version after redefinition.  An empty lambda list prints NIL.  Missing metadata produces an unavailable message.  The operation preserves selection and expression/value history.
 
 Each stop owns its current-frame index, initially zero.  Closed stops report NIL.  Selection survives controller replacement and image restoration.  A nested stop has independent selection.  Movement changes the index on the target thread before printing.  If printing enters a child debugger, aborting that operation preserves the parent's selected index.  Local records have the same shape as :locals results.  :locals leaves selection unchanged.
 
