@@ -209,6 +209,7 @@ Job information has this shape:
  :current-boot-p boolean
  :stops (stop-token ...)
  :next-interrupt-id integer
+ :interruptible-p boolean
  :interrupt-id integer-or-nil
  :input-mode input-mode
  :input-length integer
@@ -240,11 +241,11 @@ Restored jobs require fresh session tokens.  Information reports whether their o
  :result cancellation-reason-or-nil)
 ```
 
-IDs start at zero and increase per job.  Any attached session can submit or query requests.  Same-boot replay of an accepted ID returns that ID without another delivery, including after job completion.  Earlier-boot replay reports `:request-conflict`.  One request can be pending or running per job.
+IDs start at zero and increase per job.  Any attached session can submit or query requests.  Same-boot replay of an accepted ID returns that ID without another delivery, including after job completion.  Earlier-boot replay reports `:request-conflict`.  One request can be pending per job.  A running interruption permits a nested request while its debugger executes a command.  Job information reports the innermost outstanding :INTERRUPT-ID and sampled :INTERRUPTIBLE-P.  Delivery validates the target's state again.
 
 States are `:pending`, `:running`, `:returned`, `:unwound`, `:cancelled`, and `:expired`.  Delivery uses a thread foothold and respects inhibition.  The retained stop offers CONTINUE and the job's ABORT restart.  Continuing records `:returned`.  A nonlocal exit records `:unwound`, independently of the job's final outcome.
 
-Cancellation records `:already-stopped` when delivery finds an existing retained stop, including a running debugger command.  Completion cancels undelivered requests with `:job-complete`.  A queued request selected after restore expires.  A restored running interrupt stop can continue while `:current-boot-p` remains NIL.  The [debugger guide](https://github.com/jsmorph/Mezzano/blob/debugging/doc/debugger.md#interruption) specifies the interruption lifetime.
+Cancellation records `:already-stopped` when delivery finds a debugger waiting for a command.  Delivery during an executing command enters a child stop inside the command's ABORT boundary.  CONTINUE resumes the operation.  Its command ABORT abandons the operation and preserves the original stop.  A preceding running interrupt becomes the reported :INTERRUPT-ID again after the nested request finishes.  Completion cancels undelivered requests with `:job-complete`.  A queued request selected after restore expires.  A restored running interrupt stop can continue while `:current-boot-p` remains NIL.  The [debugger guide](https://github.com/jsmorph/Mezzano/blob/debugging/doc/debugger.md#interruption) specifies the interruption lifetime.
 
 ## Rejection reasons
 
@@ -286,7 +287,7 @@ The following reasons appear in `(:error reason)`.  Earlier validation can deter
 | `:expired-job` | The guest job handle has the wrong kind or boot identity. |
 | `:released-job` | The job was released, including an attempt to reuse its name. |
 | `:job-complete` | A new interruption targets a completed job. |
-| `:interrupt-busy` | The job has a pending or running interrupt request. |
+| `:interrupt-busy` | The job has a pending request, or its running interruption has no executing debugger command. |
 | `:self-interrupt` | A new request targets the calling thread. |
 | `:unknown-interrupt` | The job has no record for that interrupt ID. |
 | `:job-active` | Release was requested while the job was running. |
