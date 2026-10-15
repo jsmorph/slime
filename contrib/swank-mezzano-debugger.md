@@ -134,6 +134,7 @@ The example name and token are placeholders.
 | `:locals` | A frame token from this stop. | List of `(:index integer :name string :available-p boolean :value string-or-nil)`. |
 | `:catches` | NIL for selected frame, or T for all retained frames. | Formatted active catch tags and available destination functions and hexadecimal byte offsets. |
 | `:handlers` | NIL for selected frame, or T for all retained frames. | Formatted condition types, handler functions, and active/inactive state at debugger entry. |
+| `:lexical-environment` | NIL or omitted. | Formatted inherited lexical variable and local-function values, or explicit missing ancestry/storage.  Preserves selection and evaluation history. |
 | `:bindings` | NIL, or (all-p matching-string), where all-p is NIL or T. | Formatted special bindings established by the selected frame or all retained frames. |
 | `:function` | NIL or omitted. | Printed associated function after assigning the debugger level's * value. |
 | `:compiled-code` | NIL or omitted. | Complete selected executing-function disassembly as a string. |
