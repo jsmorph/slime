@@ -86,6 +86,8 @@ Stop information has this shape:
  :state stop-state
  :depth positive-integer
  :prompt string
+ :evaluation-environment evaluation-environment
+ :evaluation-prompt string
  :thread thread-name
  :parent-id integer-or-nil
  :parent stop-token-or-nil
@@ -95,7 +97,7 @@ Stop information has this shape:
  :next-command-id integer)
 ```
 
-Here `stop-state` is `:stopped` or `:closed`.  The thread field in stop and job information is a bounded display string derived from the guest thread's name, using the label rules in [Processes](#processes).  Parent ID remains descriptive after parent release.  Parent and child tokens refer to retained records.  Command IDs start at zero and increase within a stop.
+Here `stop-state` is `:stopped` or `:closed`.  The evaluation environment is `:lexical` or `:dynamic`.  The evaluation prompt is `Eval (program): ` or `Eval (debugger): `, respectively.  The thread field in stop and job information is a bounded display string derived from the guest thread's name, using the label rules in [Processes](#processes).  Parent ID remains descriptive after parent release.  Parent and child tokens refer to retained records.  Command IDs start at zero and increase within a stop.
 
 An illustrative request uses quoted token data inside SWANK's RPC form:
 
@@ -130,7 +132,7 @@ The example name and token are placeholders.
 | `:modify` | (part-token start count). | Page after storing the primary value of an expression read through QUERY-IO. |
 | `:describe-object` | Object token or NIL. | DESCRIBE output string. |
 | `:clear-inspection` | NIL or omitted. | NIL after releasing retained inspection references. |
-| `:evaluate` | Source string containing one Lisp form. | List of printed values from evaluation in the selected frame. |
+| `:evaluate` | Source string containing one Lisp form. | List of printed values from the stop's current evaluation mode. |
 | `:condition` | `NIL` or omitted. | Printed condition string. |
 | `:restarts` | `NIL` or omitted. | List of `(:index integer :name string :description string :default-p boolean)`. |
 | `:frames` | `NIL` or omitted. | List of `(:frame frame-token :function string)`, from the service activation toward older callers. |
@@ -138,6 +140,9 @@ The example name and token are placeholders.
 | `:catches` | NIL for selected frame, or T for all retained frames. | Formatted active catch tags and available destination functions and hexadecimal byte offsets. |
 | `:handlers` | NIL for selected frame, or T for all retained frames. | Formatted condition types, handler functions, and active/inactive state at debugger entry. |
 | `:lexical-environment` | NIL or omitted. | Formatted inherited lexical variable and local-function values, or explicit missing ancestry/storage.  Preserves selection and evaluation history. |
+| `:use-lexical-environment` | NIL or omitted. | Selects live frame lexical evaluation and returns `Eval (program): `. |
+| `:use-dynamic-environment` | NIL or omitted. | Selects null-lexical-environment evaluation and returns `Eval (debugger): `. |
+| `:toggle-evaluation-environment` | NIL or omitted. | Toggles the mode once and returns its evaluation prompt. |
 | `:bindings` | NIL, or (all-p matching-string), where all-p is NIL or T. | Formatted special bindings established by the selected frame or all retained frames. |
 | `:function` | NIL or omitted. | Printed associated function after assigning the debugger level's * value. |
 | `:compiled-code` | NIL or omitted. | Complete selected executing-function disassembly as a string. |
@@ -156,11 +161,13 @@ The example name and token are placeholders.
 | `:proceed` | NIL or omitted. | Invokes the first captured CL:CONTINUE restart interactively.  A returning restart supplies printed values. |
 | `:help` | NIL or omitted. | Guest debugger command descriptions as a string. |
 
-A printed Lisp `NIL` is the string `"NIL"`.  An unavailable local has `:available-p NIL` and `:value NIL`.  Restart names and local names are printed representations and can include package prefixes.  Local indices identify entries within that returned list.  The current API accepts frame tokens for inspection and evaluates expressions against the selected frame.  Assignment within an expression writes its live binding.
+A printed Lisp `NIL` is the string `"NIL"`.  An unavailable local has `:available-p NIL` and `:value NIL`.  Restart names and local names are printed representations and can include package prefixes.  Local indices identify entries within that returned list.  The current API accepts frame tokens for inspection and evaluates expressions against the selected frame.  Assignment within lexical evaluation writes its live binding.
+
+Each outer stop starts in lexical mode, and a child inherits its parent's mode.  Later choices are independent.  The three environment operations preserve frame selection and history and reject non-NIL arguments before consuming a command ID.  Accepted toggle replay returns the stored prompt without toggling again.  Mode survives controller replacement and parked image restoration.  Dynamic evaluation uses the stopped thread's package and debugger-time special bindings with a null lexical environment, allowing evaluation without selected-frame scope metadata.  Historical special-variable environments and standard-variable rebinding remain separate requirements.
 
 EVALUATE copies its accepted source.  Reading binds `*READ-EVAL*` to `NIL` and requires exactly one form.  Execution uses the stopped thread's package and dynamic bindings, with the program's condition handlers disabled during command execution.  Lexical lookup includes variables, local functions, symbol macros, and local macros.  Writes check source declarations and storage types.  Each stop owns separate standard expression/value histories.  Reader, evaluator, printer, unavailable-scope, and unavailable-binding conditions enter a child debugger.  Its command ABORT abandons the expression.
 
-A nonstring argument rejects :INVALID-SOURCE before acceptance.  Unavailable lexical metadata reports :UNAVAILABLE-LEXICAL-SCOPE during execution, and missing binding storage reports :UNAVAILABLE-BINDING.  Unsupported source BLOCK/GO transfer reports :UNAVAILABLE-CONTROL-TARGET.  Frame-backed closures require an active reference on the owning thread.  Another thread reports :FOREIGN-FRAME-THREAD, and expired references retain the ordinary stop/frame errors.  See the [frame-evaluation reference](https://github.com/jsmorph/Mezzano/blob/debugging/doc/debugger.md#frame-evaluation).
+A nonstring argument rejects :INVALID-SOURCE before acceptance.  Lexical mode reports :UNAVAILABLE-LEXICAL-SCOPE for missing scope metadata during execution and :UNAVAILABLE-BINDING for missing binding storage.  Unsupported source BLOCK/GO transfer reports :UNAVAILABLE-CONTROL-TARGET.  Frame-backed closures require an active reference on the owning thread.  Another thread reports :FOREIGN-FRAME-THREAD, and expired references retain the ordinary stop/frame errors.  See the [frame-evaluation reference](https://github.com/jsmorph/Mezzano/blob/debugging/doc/debugger.md#frame-evaluation).
 
 FUNCTION assigns only the level's * history slot before printing its associated function.  The assignment survives printer Abort.  Selection and the other eight history slots remain unchanged.  A generated discriminator can report its associated generic function.  Genera's + locative assignment remains unsupported.
 
