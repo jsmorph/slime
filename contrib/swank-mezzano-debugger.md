@@ -115,9 +115,12 @@ The example name and token are placeholders.
 ```lisp
 (:state command-state
  :operation command-operation
+ :source source-string-or-nil
  :current-boot-p boolean
  :result operation-result)
 ```
+
+`:source` is a separate copy of the accepted source string for :EVALUATE, and NIL for other operations.  Querying a result does not execute its command or change frame selection or evaluation history.  Retained source remains available for prior-boot evaluations.  Other command arguments are not included.
 
 `:current-boot-p` compares the command's acceptance boot with the current boot.  A restored running command can finish while this field remains `NIL`.  The states and their transitions are defined in [stop and command lifetimes](https://github.com/jsmorph/Mezzano/blob/debugging/doc/debugger.md#stop-and-command-lifetimes).
 
