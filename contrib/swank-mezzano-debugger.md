@@ -61,7 +61,7 @@ These functions are exported from `SWANK/MEZZANO-DEBUGGER`.
 | `request name operation &rest arguments` | The operation-specific value below. |
 | `transient-request name operation &rest arguments` | The operation-specific value, after detaching the session. |
 
-`transient-request` creates or resumes an attachment for one operation and releases its controller and connection association before replying.  It uses the same session lock and checks as the persistent APIs.  `:open-session` creates a session, and `:resume-session` verifies an existing session.  Both take no arguments and return its name.  All operations below are available except `:attach`.  Transient `:submit` and `:release-stop` take a **stop token** in place of the lease token and acquire control within the operation.  The adapter retains no token for that temporary lease.
+`transient-request` creates or resumes an attachment for one operation and releases its controller and connection association before replying.  It uses the same session lock and checks as the persistent APIs.  `:open-session` creates a session, and `:resume-session` verifies an existing session.  Both take no arguments and return its name.  All operations below are available except `:attach`.  Transient `:submit`, `:command-input`, and `:release-stop` take a **stop token** in place of the lease token and acquire control within the operation.  The adapter retains no token for that temporary lease.
 
 Cleanup runs on successful completion, typed rejection, and ordinary Lisp error.  A rejection before attachment preserves another client's controller.  Accepted commands continue after detachment, and session handles, Listener state, jobs, and command results persist.  A connection using this entry point can remain open between requests without holding debugger control.  The persistent APIs retain their existing attachment and lease lifetime.
 
@@ -76,6 +76,8 @@ The attached connection sends `request` operations:
 | `:attach` | Stop token. | A new exclusive control-lease token.  Closed stops can be attached for release. |
 | `:submit` | Lease token, command ID, command operation, optional argument. | The accepted or previously accepted command ID. |
 | `:result` | Stop token, command ID. | The command record.  Control ownership is unnecessary for this query. |
+| `:command-output` | Stop token, command ID, start character offset, optional end. | Copied `(:start start :text string :end offset)`. |
+| `:command-input` | Lease token, command ID, offset, text, optional `:eof`. | Accepted ending character offset. |
 | `:release-stop` | Lease token. | `NIL`.  Removes a closed stop and its command history. |
 | `:release-session` | None. | `NIL`.  Releases session storage and control. |
 
@@ -119,12 +121,22 @@ The example name and token are placeholders.
  :operation command-operation
  :source source-string-or-nil
  :current-boot-p boolean
- :result operation-result)
+ :result operation-result
+ :input-length nonnegative-integer
+ :input-eof-p boolean
+ :input-waiting-p boolean
+ :output-length nonnegative-integer)
 ```
 
 `:source` is a separate copy of the accepted source string for :EVALUATE, and NIL for other operations.  Querying a result does not execute its command or change frame selection or evaluation history.  Retained source remains available for prior-boot evaluations.  Other command arguments are not included.
 
 `:current-boot-p` compares the command's acceptance boot with the current boot.  A restored running command can finish while this field remains `NIL`.  The states and their transitions are defined in [stop and command lifetimes](https://github.com/jsmorph/Mezzano/blob/debugging/doc/debugger.md#stop-and-command-lifetimes).
+
+Each accepted debugger command owns character input and output independently of an evaluation job.  Its standard input uses that input stream.  Standard, error, and trace output share its output stream.  Query, debug, and terminal I/O combine the two.  Batch jobs and threads without jobs use the same command API.  A recursive command has separate streams, and a suspended parent retains its reader and buffered input.
+
+Input appends at the accepted character offset while the command is pending or running.  An exact retained range recognizes replay, including after completion.  Conflicting or gapped input reports `:input-conflict`.  EOF belongs to one command.  New input after EOF, closure, or completion reports `:input-closed`.  Each later command starts with fresh input.  Input requires the stop's current control lease.  Output reads require a current stop token and report `:invalid-output-range` for invalid bounds.  Stream closure retains accepted text and output until stop release.
+
+Commands predating this API retain their results and have no stream context.  Their lengths are zero, EOF is true, waiting is false, and output is empty.  Their input reports `:input-closed`.  A fresh current-boot handle can supply input to a restored running command without replaying its submission.  Prior-boot command submission remains rejected.  Snapshot acceptance for command I/O requires the tests stated in the debugger guide.
 
 | Command operation | Argument | Result when state is `:returned` |
 |---|---|---|
@@ -165,7 +177,7 @@ The example name and token are placeholders.
 
 A printed Lisp `NIL` is the string `"NIL"`.  An unavailable local has `:available-p NIL` and `:value NIL`.  Restart names and local names are printed representations and can include package prefixes.  Local indices identify entries within that returned list.  The current API accepts frame tokens for inspection and evaluates expressions against the selected frame.  Assignment within lexical evaluation writes its live binding.
 
-Each outer stop starts in lexical mode, and a child inherits its parent's mode.  Later choices are independent.  The three environment operations preserve frame selection and history and reject non-NIL arguments before consuming a command ID.  Accepted toggle replay returns the stored prompt without toggling again.  Mode survives controller replacement and parked image restoration.  Dynamic evaluation uses the stop's reader/printer controls and the stopped thread's other debugger-time special bindings with a null lexical environment, allowing evaluation without selected-frame scope metadata.  Lexical evaluation uses the selected established x86-64 frame's original special-binding cells, including through called compiled functions.  Dynamic evaluation retains the point-of-error bindings.  New LET/PROGV bindings shadow the selected environment normally.  A child debugger starts from its condition's active bindings.  Stream rebinding remains separate work.
+Each outer stop starts in lexical mode, and a child inherits its parent's mode.  Later choices are independent.  The three environment operations preserve frame selection and history and reject non-NIL arguments before consuming a command ID.  Accepted toggle replay returns the stored prompt without toggling again.  Mode survives controller replacement and parked image restoration.  Dynamic evaluation uses the stop's reader/printer controls and the stopped thread's other debugger-time special bindings with a null lexical environment, allowing evaluation without selected-frame scope metadata.  Lexical evaluation uses the selected established x86-64 frame's original special-binding cells, including through called compiled functions.  Dynamic evaluation retains the point-of-error bindings.  New LET/PROGV bindings shadow the selected environment normally.  A child debugger starts from its condition's active bindings.  Each command uses the standard stream bindings described above.  Streams environment inspection remains separate work.
 
 STANDARD-VALUE-WARNINGS returns the stop's corrections to `*PACKAGE*`, `*READ-BASE*`, `*PRINT-BASE*`, and `*READ-DEFAULT-FLOAT-FORMAT*` in occurrence order.  Before each command, invalid or unbound values receive COMMON-LISP-USER, 10, 10, or SINGLE-FLOAT respectively.  Valid values and debugger edits persist within the stop.  Child edits are independent.  Command return or nonlocal exit restores program bindings, and stop closure releases the saved controls and warnings.  The display distinguishes bound NIL from [unbound].  With no corrections it returns "There were no standard values which required binding".  A non-NIL argument rejects :UNEXPECTED-ARGUMENT before acceptance.  Replay compares arguments with EQL and returns retained text without printing again.  Printer errors enter a child under the command ABORT boundary.  Selection and all nine histories remain unchanged.  Parked restoration retains the saved controls and warnings.  The [standard-value reference](https://github.com/jsmorph/Mezzano/blob/debugging/doc/debugger.md#standard-values) specifies validity rules and tested scope.
 

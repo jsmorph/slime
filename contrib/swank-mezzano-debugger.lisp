@@ -330,6 +330,16 @@
     (:result
      (destructuring-bind (token id) arguments
        (command-result session (decode-handle session :stop token) id)))
+    (:command-output
+     (destructuring-bind (token id start &optional end) arguments
+       (multiple-value-bind (text end)
+           (mezzano.debug:debugger-command-output
+            (decode-handle session :stop token) id start end)
+         (list :start start :text text :end end))))
+    (:command-input
+     (destructuring-bind (token id offset text &key eof) arguments
+       (mezzano.debug:supply-debugger-command-input
+        (control-lease session token transient-p) id offset text :eof eof)))
     (:release-stop
      (destructuring-bind (token) arguments
        (mezzano.debug:release-debugger-stop (control-lease session token transient-p))
