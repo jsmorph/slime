@@ -172,6 +172,7 @@ Commands predating this API retain their results and have no stream context.  Th
 | `:invoke-restart-interactively` | Restart index. | List of printed values if the restart returns.  Its interactive function obtains arguments through QUERY-IO. |
 | `:invoke-restart-with-arguments` | Restart index, or NIL/omitted for default CONTINUE. | Prompts through QUERY-IO for one Lisp expression whose primary value is a finite proper argument list, evaluates it, and applies INVOKE-RESTART.  Returns a list of printed values if the restart returns. |
 | `:abort` | NIL or omitted. | Invokes the innermost captured CL:ABORT restart.  A returning restart supplies printed values. |
+| `:return` | NIL or omitted. | Prompts for an expression supplying all return values, displays them, and asks for confirmation.  Cancellation returns `"Return cancelled."`.  Successful transfer records `:UNWOUND` and closes the stop.  Native x86-64 condition-stop support and limits follow the [Frame Return reference](https://github.com/jsmorph/Mezzano/blob/debugging/doc/debugger.md#frame-return). |
 | `:proceed` | NIL or omitted. | Invokes the first captured CL:CONTINUE restart interactively.  A returning restart supplies printed values. |
 | `:help` | NIL or omitted. | Guest debugger command descriptions as a string. |
 
