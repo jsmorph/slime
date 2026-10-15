@@ -139,7 +139,8 @@
 (defun stop-information (session handle)
   (let ((info (mezzano.debug:debugger-stop-information handle)))
     (setf (getf info :parent) (encode-stop session (getf info :parent))
-          (getf info :child) (encode-stop session (getf info :child)))
+          (getf info :child) (encode-stop session (getf info :child))
+          (getf info :thread-stop) (encode-stop session (getf info :thread-stop)))
     info))
 
 (defun process-summary (session)
@@ -260,7 +261,8 @@
   (handler-case
       (let ((info (mezzano.debug:debugger-stop-information handle)))
         (setf (getf info :parent) (monitor-stop-token session (getf info :parent))
-              (getf info :child) (monitor-stop-token session (getf info :child)))
+              (getf info :child) (monitor-stop-token session (getf info :child))
+              (getf info :thread-stop) (monitor-stop-token session (getf info :thread-stop)))
         (let ((token (monitor-stop-token session handle)))
           (when token (list :token token :information info))))
     (mezzano.debug:debugger-service-error (condition)

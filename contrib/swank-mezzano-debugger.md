@@ -91,6 +91,7 @@ Stop information has this shape:
  :evaluation-environment evaluation-environment
  :evaluation-prompt string
  :thread thread-name
+ :thread-stop stop-token-or-nil
  :parent-id integer-or-nil
  :parent stop-token-or-nil
  :child stop-token-or-nil
@@ -99,7 +100,7 @@ Stop information has this shape:
  :next-command-id integer)
 ```
 
-Here `stop-state` is `:stopped` or `:closed`.  The evaluation environment is `:lexical` or `:dynamic`.  The evaluation prompt is `Eval (program): ` or `Eval (debugger): `, respectively.  The thread field in stop and job information is a bounded display string derived from the guest thread's name, using the label rules in [Processes](#processes).  Parent ID remains descriptive after parent release.  Parent and child tokens refer to retained records.  Command IDs start at zero and increase within a stop.
+Here `stop-state` is `:stopped` or `:closed`.  The evaluation environment is `:lexical` or `:dynamic`.  The evaluation prompt is `Eval (program): ` or `Eval (debugger): `, respectively.  The thread field in stop and job information is a bounded display string derived from the guest thread's name, using the label rules in [Processes](#processes).  A closed record's `:thread-stop` identifies the active leaf stop on the same retained guest thread, including a cleanup's new root.  Active records and threads without an active stop report NIL.  Direct information and monitor-state encode the same stop token.  Parent ID remains descriptive after parent release.  Parent and child tokens refer to retained records.  Command IDs start at zero and increase within a stop.
 
 An illustrative request uses quoted token data inside SWANK's RPC form:
 
