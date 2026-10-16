@@ -100,7 +100,7 @@ Stop information has this shape:
  :next-command-id integer)
 ```
 
-Here `stop-state` is `:stopped` or `:closed`.  The evaluation environment is `:lexical` or `:dynamic`.  The evaluation prompt is `Eval (program): ` or `Eval (debugger): `, respectively.  The thread field in stop and job information is a bounded display string derived from the guest thread's name, using the label rules in [Processes](#processes).  A closed record's `:thread-stop` identifies the active leaf stop on the same retained guest thread, including a cleanup's new root.  Active records and threads without an active stop report NIL.  Direct information and monitor-state encode the same stop token.  Parent ID remains descriptive after parent release.  Parent and child tokens refer to retained records.  Command IDs start at zero and increase within a stop.
+Here `stop-state` is `:stopped`, `:stepping`, or `:closed`.  The evaluation environment is `:lexical` or `:dynamic`.  The evaluation prompt is `Eval (program): ` or `Eval (debugger): `, respectively.  The thread field in stop and job information is a bounded display string derived from the guest thread's name, using the label rules in [Processes](#processes).  A closed record's `:thread-stop` identifies the active leaf stop on the same retained guest thread, including a cleanup's new root.  Active records and threads without an active stop report NIL.  Direct information and monitor-state encode the same stop token.  Parent ID remains descriptive after parent release.  Parent and child tokens refer to retained records.  Command IDs start at zero and increase within a stop.  A stepping stop remains associated with its evaluation job and process.  It retains its lease and command history, rejects new commands with :STOP-STEPPING, and publishes fresh frame/restart references when it stops again.  The accepted step records :UNWOUND.  Replaying its accepted ID executes no further instruction.
 
 An illustrative request uses quoted token data inside SWANK's RPC form:
 
@@ -119,6 +119,7 @@ The example name and token are placeholders.
 
 ```lisp
 (:state command-state
+ :generation nonnegative-integer
  :operation command-operation
  :source source-string-or-nil
  :current-boot-p boolean
@@ -128,6 +129,8 @@ The example name and token are placeholders.
  :input-waiting-p boolean
  :output-length nonnegative-integer)
 ```
+
+`:generation` is the stop generation at command acceptance.  It remains unchanged on completion and replay.  A client uses it to distinguish historical inspection results from the current stopped activation.
 
 `:source` is a separate copy of the accepted source string for :EVALUATE, and NIL for other operations.  Querying a result does not execute its command or change frame selection or evaluation history.  Retained source remains available for prior-boot evaluations.  Other command arguments are not included.
 
@@ -162,6 +165,7 @@ Commands predating this API retain their results and have no stream context.  Th
 | `:function` | NIL or omitted. | Printed associated function after assigning the debugger level's * value. |
 | `:compiled-code` | NIL or omitted. | Complete selected executing-function disassembly as a string. |
 | `:instruction` | NIL or omitted. | Selected instruction as a string, with saved-caller or interrupted-PC header, or an unavailable message. |
+| `:single-step` | NIL or omitted. | Steps one supported x86-64 instruction at the selected interrupted frame.  CALL runs to its return or escaping nonlocal-exit destination. |
 | `:set-breakpoint` | (function-source offset), a string and a nonnegative integer. | Formatted installation result.  The new location requires authoritative instruction metadata. |
 | `:clear-breakpoint` | (function-source offset), a string and a nonnegative integer. | Formatted removed-or-absent result. |
 | `:clear-all-breakpoints` | Function-name source string, or NIL for the selected frame's exact executing function. | Formatted removed count. |
