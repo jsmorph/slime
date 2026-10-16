@@ -162,6 +162,10 @@ Commands predating this API retain their results and have no stream context.  Th
 | `:function` | NIL or omitted. | Printed associated function after assigning the debugger level's * value. |
 | `:compiled-code` | NIL or omitted. | Complete selected executing-function disassembly as a string. |
 | `:instruction` | NIL or omitted. | Selected instruction as a string, with saved-caller or interrupted-PC header, or an unavailable message. |
+| `:set-breakpoint` | (function-source offset), a string and a nonnegative integer. | Formatted installation result.  The new location requires authoritative instruction metadata. |
+| `:clear-breakpoint` | (function-source offset), a string and a nonnegative integer. | Formatted removed-or-absent result. |
+| `:clear-all-breakpoints` | Function-name source string, or NIL for the selected frame's exact executing function. | Formatted removed count. |
+| `:breakpoints` | NIL or omitted. | Global installed function/offset list as one formatted string. |
 | `:arglist` | NIL or omitted. | String describing the selected executing function's stored lambda list, or explicitly reporting unavailable metadata. |
 | `:current-frame` | NIL or omitted. | Selected frame inspection: `(:index integer :function string :locals local-records)`. |
 | `:select-frame` | Nonnegative frame index. | Selects the absolute index and returns its inspection. |
@@ -193,6 +197,8 @@ A nonstring argument rejects :INVALID-SOURCE before acceptance.  Lexical mode re
 FUNCTION assigns only the level's * history slot before printing its associated function.  The assignment survives printer Abort.  Selection and the other eight history slots remain unchanged.  A generated discriminator can report its associated generic function.  Genera's + locative assignment remains unsupported.
 
 COMPILED-CODE and INSTRUCTION resolve the executing function from the retained frame PC, preserving an active definition after redefinition.  COMPILED-CODE returns the complete code with labels, hexadecimal object-relative byte offsets, instruction bytes, and annotations.  INSTRUCTION resolves the decoded span containing the saved return-PC-minus-one or exact interrupted PC and labels that distinction.  Missing locations and undecoded bytes remain explicit.  These operations preserve selection and all history.  All three operations reject non-NIL arguments with :UNEXPECTED-ARGUMENT before acceptance and compare replay arguments with EQL.  Printers run under the existing command ABORT boundary.  Explicit function/range arguments and other Genera code-display options remain unsupported.  See the [function and instruction reference](https://github.com/jsmorph/Mezzano/blob/debugging/doc/debugger.md#functions-and-instructions) for tested stopping states and invalid-argument helper identity.
+
+SET-BREAKPOINT and CLEAR-BREAKPOINT copy both their argument list and function-source string at acceptance.  CLEAR-ALL-BREAKPOINTS copies its source string.  Malformed arguments reject :INVALID-BREAKPOINT-LOCATION or :INVALID-BREAKPOINT-FUNCTION before consuming an ID.  BREAKPOINTS rejects non-NIL arguments with :UNEXPECTED-ARGUMENT.  Function-name reading disables read-time evaluation and accepts one Mezzano function name in the debugger's current package.  It resolves the current definition during execution.  A NIL bulk-clear argument uses the selected frame's exact executing function, including an older active definition.  The commands preserve selection and all history.  Reader, resolution, location, capacity, and printer conditions enter a child debugger under the command ABORT restart.  Earlier completed mutations persist through a later printer error.  Matching accepted replay returns the original result without repeating installation/removal.  The [breakpoint reference](https://github.com/jsmorph/Mezzano/blob/debugging/doc/debugger.md#lisp-breakpoint-management) defines four-location x86-64 support, byte offsets, instruction metadata, redefinition, restoration, and remaining limits.
 
 ARGLIST reads the executing compiled function's metadata, preserving the active version after redefinition.  An empty lambda list prints NIL.  Missing metadata produces an unavailable message.  The operation preserves selection and expression/value history.
 
@@ -241,7 +247,7 @@ Inspect and Modify copy their three-element arguments on acceptance and compare 
 
 ### Reconnection and duplicate submission
 
-After a lost reply, resume the session, reacquire control, and query the original command ID.  Repeating an accepted submission in the same boot returns its ID without executing it again if the operation and argument match.  Guest comparison uses `EQ` for the operation, `EQUAL` for an `:evaluate` source string or an `:inspect`/`:modify` argument list, and `EQL` for other arguments.  For `:locals`, the original token must resolve to the original frame-reference object.
+After a lost reply, resume the session, reacquire control, and query the original command ID.  Repeating an accepted submission in the same boot returns its ID without executing it again if the operation and argument match.  Guest comparison uses `EQ` for the operation and `EQUAL` for arguments to `:evaluate`, `:inspect`, `:modify`, `:bindings`, `:special`, `:reinvoke`, `:set-breakpoint`, `:clear-breakpoint`, and `:clear-all-breakpoints`.  Other arguments use `EQL`.  For `:locals`, the original token must resolve to the original frame-reference object.
 
 Duplicate recognition still requires a valid lease.  A new command uses `:next-command-id`, and a busy stop rejects it.  Closed stops retain outcomes and recognize matching prior submissions until explicit release.
 
@@ -358,7 +364,7 @@ Cancellation records `:already-stopped` when delivery finds a debugger waiting f
 
 ## Rejection reasons
 
-The following reasons appear in `(:error reason)`.  Earlier validation can determine which error is reported.  For example, an old lease's stop handle can cause `:expired-stop` before controller validation.
+Request-validation failures return `(:error reason)` before command acceptance.  Errors signaled during command execution enter a child debugger under the command ABORT restart.  The table identifies both kinds.  Earlier validation can determine which reason wins when several conditions are invalid.
 
 | Reason | Meaning |
 |---|---|
@@ -391,6 +397,15 @@ The following reasons appear in `(:error reason)`.  Earlier validation can deter
 | `:invalid-frame` | The frame index, movement count, or resulting target is invalid. |
 | `:invalid-restart` | The command argument is outside the retained restart-index range. |
 | `:no-continue-restart` | Default Proceed has no captured CL:CONTINUE restart.  Select an explicit restart index. |
+| `:invalid-breakpoint-location` | Set/Clear did not receive a proper two-element list containing a source string and a nonnegative integer.  Rejected before acceptance. |
+| `:invalid-breakpoint-function` | Clear All did not receive a string or NIL.  Rejected before acceptance. |
+| `:expected-function-name` | The source does not contain exactly one valid function name.  Signals during command execution. |
+| `:unavailable-function` | A default Clear All cannot identify the selected frame's executing function. |
+| `:not-compiled-function` | A new breakpoint target is not an ordinary compiled function object. |
+| `:resident-function` | A new breakpoint target resides in resident kernel/runtime memory. |
+| `:invalid-instruction-offset` | A new breakpoint offset is outside the compiled function's code. |
+| `:instruction-boundaries-unavailable` | A new target lacks the assembler's instruction-start map. |
+| `:not-instruction-start` | A new breakpoint offset does not start an instruction. |
 | `:unknown-operation` | The submitted guest command operation is unsupported. |
 | `:unknown-command` | No command with that ID is recorded for the stop. |
 | `:invalid-job-name` | A job name does not have the required format. |
