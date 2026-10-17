@@ -4,15 +4,17 @@ The `swank-mezzano-debugger` contrib exposes retained evaluation jobs, debugger 
 
 The [debugger guide](https://github.com/jsmorph/Mezzano/blob/debugging/doc/debugger.md) describes supported operations and lifetime rules.  The [remote client guide](https://github.com/jsmorph/Mezzano/blob/debugging/tools/swank/README.md) provides executable session examples.  [Installation and operation](https://github.com/jsmorph/Mezzano/blob/debugging/doc/installation.md) covers the guest and network endpoint.
 
-## Compatibility and transport
+## Requirements and transport
 
-The guest needs Mezzano's debugger, evaluation, Command Processor, and Document Examiner modules, together with this contrib.  The protocol has no version negotiation.  A client must use the operations and result fields provided by its installed server.
+The guest needs Mezzano's debugger, evaluation, Command Processor, Document Examiner, and shared remote-service modules, together with this contrib.  The protocol has no version negotiation.  A client must use the operations and result fields provided by its installed server.
 
 Load the contrib through SWANK:
 
 ```lisp
 (swank:swank-require :swank-mezzano-debugger)
 ```
+
+Session storage, opaque handles, Listener state, and operation dispatch live in `MEZZANO.REMOTE-SERVICE` inside Mezzano.  This contrib checks the live SWANK connection and supplies it as the session owner.  The guest HTTP server calls the same shared service with a transient owner and releases its debugger controller before replying.  Both transports retain the same object and operation lifetime rules.
 
 RPCs use SWANK's existing S-expression transport.  Each exported function returns `(:ok value)` or `(:error reason)` for the protocol and service conditions listed below.  A successful SWANK dispatch therefore wraps the reply again:
 
@@ -21,7 +23,7 @@ RPCs use SWANK's existing S-expression transport.  Each exported function return
 (:return (:ok (:error reason)) rpc-id)
 ```
 
-Malformed argument lists, unknown dispatch operations, and other ordinary Lisp errors can enter SWANK's debugger.  The contrib catches its protocol condition and `mezzano.debug:debugger-service-error`.  The host client reports other debugger entries as errors and requests SWANK's top-level abort.
+Malformed argument lists, unknown dispatch operations, and other ordinary Lisp errors can enter SWANK's debugger.  The shared service catches its protocol condition and `mezzano.debug:debugger-service-error`.  The host client reports other debugger entries as errors and requests SWANK's top-level abort.
 
 SWANK permits arbitrary Lisp evaluation with the guest's authority.  Session names and tokens identify debugger objects within that connection.
 
@@ -33,7 +35,7 @@ One connection can attach to one session, and one session can attach to one conn
 
 SWANK completes connection registration before starting request handling.  With a sentinel thread, the accepting thread waits for the sentinel to add the connection and acknowledge it.  Session attachment can then check the registered connection without racing its startup.
 
-Explicit session release clears its controller, connection, and token tables.  The first adapter operation after a boot change releases all old sessions.  The adapter retains used names, including released names, to reject reuse.  Stop records and their command history have independent guest lifetimes.
+Explicit session release clears its controller, connection, and token tables.  The first service operation after a boot change releases all old sessions.  The shared service retains used names, including released names, to reject reuse.  Stop records and their command history have independent guest lifetimes.
 
 Tokens are proper three-element lists:
 
