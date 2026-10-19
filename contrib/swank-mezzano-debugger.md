@@ -173,6 +173,7 @@ Commands predating this API retain their results and have no stream context.  Th
 | `:clear-all-breakpoints` | Function-name source string, or NIL for the selected frame's exact executing function. | Formatted removed count. |
 | `:breakpoints` | NIL or omitted. | Global installed function/offset list as one formatted string. |
 | `:arglist` | NIL or omitted. | String describing the selected executing function's stored lambda list, or explicitly reporting unavailable metadata. |
+| `:argument` | NIL for All, or a nonnegative index. | Current source parameters as text.  Indexed available values assign only *.  All and unavailable data preserve history. |
 | `:rest-argument` | NIL or omitted. | Formatted current rest parameter after assigning only *.  Available NIL, absent rest, and unavailable metadata/storage have distinct displays. |
 | `:current-frame` | NIL or omitted. | Selected frame inspection: `(:index integer :function string :arguments string :locals local-records)`. |
 | `:select-frame` | Nonnegative frame index. | Selects the absolute index and returns its inspection. |
@@ -217,7 +218,9 @@ CATCHES lists active tags established by the selected frame or all retained fram
 
 HANDLERS lists clusters established by the selected frame or all retained frames.  It distinguishes SIGNAL's temporary deactivation from a new binding, preserving cluster identity and source order.  It reports the program's active state at debugger entry even though command execution disables application handlers.  Invalid options reject :INVALID-HANDLER-OPTIONS before acceptance.  Replay compares the Boolean argument with EQL.  Selection and expression/value history remain unchanged.  Established x86-64 frames are supported; unsupported layouts report unavailable locations.  A printer condition enters a child debugger under the command's ABORT restart.
 
-Each stop owns its current-frame index, initially zero.  Closed stops report NIL.  Selection survives controller replacement and image restoration.  A nested stop has independent selection.  Movement changes the index on the target thread before printing.  If printing enters a child debugger, aborting that operation preserves the parent's selected index.  Local records have the same shape as :locals results.  :locals leaves selection unchanged.  The :arguments string separately labels original supplied positions and current source parameters, with explicit zero, NIL, and unavailable states.  Lisp formats it on the stopped thread and retains no new raw references.  Frame inspection preserves evaluation history.  Older retained results may lack this field.
+Each stop owns its current-frame index, initially zero.  Closed stops report NIL.  Selection survives controller replacement and image restoration.  A nested stop has independent selection.  Movement changes the index on the target thread before printing.  If printing enters a child debugger, aborting that operation preserves the parent's selected index.  Local records have the same shape as :locals results.  :locals leaves selection unchanged.  The :arguments string separately labels original supplied positions and current source parameters, with explicit zero, NIL, and unavailable states.  Current source-argument indices follow required, optional, one rest binding, then declared keys.  Supplied-p variables and AUX locals have no argument index.  Lisp formats it on the stopped thread and retains no new raw references.  Frame inspection preserves evaluation history.  Older retained results may lack this field.
+
+The :ARGUMENT operation resolves source-parameter availability and index bounds on the stopped thread.  Missing metadata or storage returns explicit unavailable text and preserves history.  A known out-of-range index signals :INVALID-ARGUMENT-INDEX during execution, before printing or changing history.  It enters a child debugger.  Aborting that child records the accepted command :UNWOUND, and replay returns that record.  Available NIL succeeds and becomes *.  All preserves history.  Writable argument locations and DBG:ARG remain unimplemented.
 
 An invalid index, count, or out-of-range movement reports :invalid-frame before acceptance, preserving selection and the next command ID.  A zero movement count inspects the current frame.  Identical accepted relative-movement replay returns the original command without moving again.
 
@@ -401,6 +404,7 @@ Request-validation failures return `(:error reason)` before command acceptance. 
 | `:stop-closed` | A new command targets a closed stop. |
 | `:stop-busy` | A pending command, active command, or child stop prevents a new command. |
 | `:unexpected-argument` | A no-argument debugger command received a non-NIL argument. |
+| `:invalid-argument-index` | :ARGUMENT received a selector other than NIL or a nonnegative integer. |
 | `:invalid-frame` | The frame index, movement count, or resulting target is invalid. |
 | `:invalid-restart` | The command argument is outside the retained restart-index range. |
 | `:no-continue-restart` | Default Proceed has no captured CL:CONTINUE restart.  Select an explicit restart index. |
