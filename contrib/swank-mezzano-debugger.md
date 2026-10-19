@@ -173,6 +173,7 @@ Commands predating this API retain their results and have no stream context.  Th
 | `:clear-all-breakpoints` | Function-name source string, or NIL for the selected frame's exact executing function. | Formatted removed count. |
 | `:breakpoints` | NIL or omitted. | Global installed function/offset list as one formatted string. |
 | `:arglist` | NIL or omitted. | String describing the selected executing function's stored lambda list, or explicitly reporting unavailable metadata. |
+| `:rest-argument` | NIL or omitted. | Formatted current rest parameter after assigning only *.  Available NIL, absent rest, and unavailable metadata/storage have distinct displays. |
 | `:current-frame` | NIL or omitted. | Selected frame inspection: `(:index integer :function string :locals local-records)`. |
 | `:select-frame` | Nonnegative frame index. | Selects the absolute index and returns its inspection. |
 | `:next-frame` | Nonnegative count. | Moves toward older callers and returns the selected frame inspection. |
