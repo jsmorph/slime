@@ -45,6 +45,9 @@
    wait-for-event
    make-tag
    thread-for-evaluation
+   call-with-open-connection
+   call-with-connection-thread
+   spawn-connection-thread
    socket-quest
 
    authenticate-client
@@ -114,8 +117,12 @@ DEDICATED-OUTPUT INPUT OUTPUT IO REPL-RESULTS"
                                                             :repl-result)))
     (typecase connection
       (multithreaded-connection
-       (setf (mconn.auto-flush-thread connection)
-             (make-auto-flush-thread out))))
+       (call-with-open-connection
+        connection
+        (lambda ()
+          (setf (mconn.auto-flush-thread connection)
+                (call-with-connection-thread
+                 connection (lambda () (make-auto-flush-thread out))))))))
     (values dedicated-output in out io repl-results)))
 
 (defun make-output-function (connection)
@@ -161,18 +168,25 @@ This is an optimized way for Lisp to deliver output to Emacs."
   (cond ((not (use-threads-p))
          (current-thread))
         (t
-         (let ((thread (mconn.repl-thread connection)))
-           (cond ((not thread) nil)
-                 ((thread-alive-p thread) thread)
-                 (t
-                  (setf (mconn.repl-thread connection)
-                        (spawn-repl-thread connection "new-repl-thread"))))))))
+         (call-with-open-connection
+          connection
+          (lambda ()
+            (let ((thread (mconn.repl-thread connection)))
+              (cond ((not thread) nil)
+                    ((thread-alive-p thread) thread)
+                    (t (spawn-repl-thread connection "new-repl-thread")))))))))
 
 (defun spawn-repl-thread (connection name)
-  (spawn (lambda ()
-           (with-bindings *default-worker-thread-bindings*
-             (repl-loop connection)))
-         :name name))
+  (call-with-open-connection
+   connection
+   (lambda ()
+     (setf (mconn.repl-thread connection)
+           (spawn-connection-thread
+            connection
+            (lambda ()
+              (with-bindings *default-worker-thread-bindings*
+                (repl-loop connection)))
+            :name name)))))
 
 (defun repl-loop (connection)
   (handle-requests connection))
@@ -200,8 +214,7 @@ This is an optimized way for Lisp to deliver output to Emacs."
       (add-hook *connection-closed-hook* 'update-redirection-after-close)
       (typecase conn
 	(multithreaded-connection
-	 (setf (mconn.repl-thread conn)
-	       (spawn-repl-thread conn "repl-thread"))))
+	 (spawn-repl-thread conn "repl-thread")))
       (list (package-name *package*)
             (package-string-for-prompt *package*)))))
 

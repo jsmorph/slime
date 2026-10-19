@@ -169,6 +169,21 @@ Backend code should treat the connection structure as opaque.")
   (communication-style nil :type (member nil :spawn :sigio :fd-handler))
   )
 
+(define-condition connection-closed (error)
+  ((connection :initarg :connection :reader connection-closed.connection))
+  (:report (lambda (condition stream)
+             (format stream "SWANK connection ~S is closed."
+                     (connection-closed.connection condition)))))
+
+(define-condition connection-cleanup-error (error)
+  ((connection :initarg :connection :reader connection-cleanup-error.connection)
+   (conditions :initarg :conditions :reader connection-cleanup-error.conditions))
+  (:report (lambda (condition stream)
+             (let ((conditions (connection-cleanup-error.conditions condition)))
+               (format stream "SWANK connection ~S cleanup failed with ~D condition~:P.~{~%~A~}"
+                       (connection-cleanup-error.connection condition)
+                       (length conditions) conditions)))))
+
 (defun print-connection (conn stream depth)
   (declare (ignore depth))
   (print-unreadable-object (conn stream :type t :identity t)))
@@ -206,6 +221,9 @@ Backend code should treat the connection structure as opaque.")
   ;; future we may store here (thread . request-tag) pairs so that we
   ;; can interrupt specific requests.
   (active-threads '() :type list)
+  (lifecycle-lock (make-lock :name "SWANK connection lifecycle"))
+  (live-p t :type boolean)
+  (owned-threads '() :type list)
   )
 
 (defvar *emacs-connection* nil
@@ -836,10 +854,13 @@ if the file doesn't exist; otherwise the first line of the file."
        (:sigio (install-sigio-handler connection))
        (:fd-handler (install-fd-handler connection))))))
 
-(defun stop-serving-requests (connection)
+(defun stop-serving-requests (connection &optional (on-error #'error)
+                                                 (threads nil threads-p))
   (etypecase connection
     (multithreaded-connection
-     (cleanup-connection-threads connection))
+     (if threads-p
+         (cleanup-connection-threads connection on-error threads)
+         (cleanup-connection-threads connection on-error)))
     (singlethreaded-connection
      (ecase (connection.communication-style connection)
        ((nil))
@@ -930,35 +951,53 @@ The processing is done in the extent of the toplevel restart."
   (send-to-sentinel `(:close-connection ,connection ,condition ,backtrace)))
 
 (defun close-connection% (c condition backtrace)
-  (let ((*debugger-hook* nil))
-    (log-event "close-connection: ~a ...~%" condition)
-    (format *log-output* "~&;; swank:close-connection: ~A~%"
-            (escape-non-ascii (safe-condition-message condition)))
-    (stop-serving-requests c)
-    (close (connection.socket-io c))
-    (when (connection.dedicated-output c)
-      (close (connection.dedicated-output c)))
-    (setf *connections* (remove c *connections*))
-    (run-hook *connection-closed-hook* c)
-    (when (and condition (not (typep condition 'end-of-file)))
-      (finish-output *log-output*)
-      (format *log-output* "~&;; Event history start:~%")
-      (dump-event-history *log-output*)
-      (format *log-output* "~
+  (multiple-value-bind (first-close-p threads) (begin-connection-close c)
+    (unless first-close-p
+      (return-from close-connection% nil))
+    (let ((*debugger-hook* nil)
+          (failures nil))
+      (flet ((record-error (condition)
+               (push condition failures)))
+        (flet ((attempt (function)
+                 (handler-case (funcall function)
+                   (error (condition) (record-error condition)))))
+          (attempt (lambda ()
+                     (log-event "close-connection: ~a~%" condition)
+                     (format *log-output* "~&;; swank:close-connection: ~A~%"
+                             (escape-non-ascii
+                              (safe-condition-message condition)))))
+          (attempt (lambda ()
+                     (stop-serving-requests c #'record-error threads)))
+          (attempt (lambda () (close (connection.socket-io c))))
+          (when (connection.dedicated-output c)
+            (attempt (lambda () (close (connection.dedicated-output c)))))
+          (attempt (lambda () (setf *connections* (remove c *connections*))))
+          (dolist (hook *connection-closed-hook*)
+            (attempt (lambda () (funcall hook c))))
+          (when (and condition (not (typep condition 'end-of-file)))
+            (attempt
+             (lambda ()
+               (finish-output *log-output*)
+               (format *log-output* "~&;; Event history start:~%")
+               (dump-event-history *log-output*)
+               (format *log-output* "~
 ;; Event history end.~%~
 ;; Backtrace:~%~{~A~%~}~
 ;; Connection to Emacs lost. [~%~
 ;;  condition: ~A~%~
 ;;  type: ~S~%~
 ;;  style: ~S]~%"
-              (loop for (i f) in backtrace collect 
-                    (ignore-errors 
-                      (format nil "~d: ~a" i (escape-non-ascii f))))
-              (escape-non-ascii (safe-condition-message condition) )
-              (type-of condition)
-              (connection.communication-style c)))
-    (finish-output *log-output*)
-    (log-event "close-connection ~a ... done.~%" condition)))
+                       (loop for (i f) in backtrace collect
+                             (format nil "~d: ~a" i (escape-non-ascii f)))
+                       (escape-non-ascii (safe-condition-message condition))
+                       (type-of condition)
+                       (connection.communication-style c)))))
+          (attempt (lambda ()
+                     (finish-output *log-output*)
+                     (log-event "close-connection ~a done.~%" condition)))
+          (when failures
+            (error 'connection-cleanup-error
+                   :connection c :conditions (nreverse failures))))))))
 
 ;;;;;; Thread based communication
 
@@ -1002,13 +1041,79 @@ The processing is done in the extent of the toplevel restart."
                                       id))
                         (current-socket-io)))))
 
+(defun connection-open-p (connection)
+  (or (not (typep connection 'multithreaded-connection))
+      (mconn.live-p connection)))
+
+(defun call-with-open-connection (connection function)
+  (flet ((call ()
+           (unless (connection-open-p connection)
+             (error 'connection-closed :connection connection))
+           (funcall function)))
+    (if (typep connection 'multithreaded-connection)
+        (call-with-lock-held (mconn.lifecycle-lock connection) #'call)
+        (call))))
+
+(defun call-with-connection-thread (connection creator)
+  (call-with-open-connection
+   connection
+   (lambda ()
+     (let* ((entry (cons nil (delete-if-not #'thread-alive-p
+                                          (mconn.owned-threads connection))))
+            (thread (funcall creator)))
+       (setf (car entry) thread
+             (mconn.owned-threads connection) entry)
+       thread))))
+
+(defun remove-owned-thread (connection thread)
+  (call-with-lock-held
+   (mconn.lifecycle-lock connection)
+   (lambda ()
+     (setf (mconn.owned-threads connection)
+           (delete thread (mconn.owned-threads connection) :test #'eq)))))
+
+(defun spawn-connection-thread (connection function &key name)
+  (call-with-connection-thread
+   connection
+   (lambda ()
+     (spawn (lambda ()
+              (unwind-protect (funcall function)
+                (remove-owned-thread connection (current-thread))))
+            :name name))))
+
+(defun connection-threads (connection)
+  (remove-duplicates
+   (append (mconn.owned-threads connection)
+           (list (mconn.repl-thread connection)
+                 (mconn.reader-thread connection)
+                 (mconn.control-thread connection)
+                 (mconn.auto-flush-thread connection)
+                 (mconn.indentation-cache-thread connection)))
+   :test #'eq))
+
+(defun begin-connection-close (connection)
+  (if (typep connection 'multithreaded-connection)
+      (call-with-lock-held
+       (mconn.lifecycle-lock connection)
+       (lambda ()
+         (when (mconn.live-p connection)
+           (let ((threads (connection-threads connection)))
+             (when (member (current-thread) threads :test #'eq)
+               (error "Owned SWANK threads must use CLOSE-CONNECTION."))
+             (setf (mconn.live-p connection) nil
+                   (mconn.owned-threads connection) nil)
+             (values t threads)))))
+      (values t nil)))
+
 (defun spawn-worker-thread (connection)
-  (spawn (lambda () 
-           (with-bindings *default-worker-thread-bindings*
-             (with-top-level-restart (connection nil)
-               (apply #'eval-for-emacs 
-                      (cdr (wait-for-event `(:emacs-rex . _)))))))
-         :name "worker"))
+  (spawn-connection-thread
+   connection
+   (lambda ()
+     (with-bindings *default-worker-thread-bindings*
+       (with-top-level-restart (connection nil)
+         (apply #'eval-for-emacs
+                (cdr (wait-for-event `(:emacs-rex . _)))))))
+   :name "worker"))
 
 (defun add-active-thread (connection thread)
   (etypecase connection
@@ -1083,12 +1188,13 @@ The processing is done in the extent of the toplevel restart."
   ;;(log-event "send-to-emacs: ~a" event)
   (without-slime-interrupts
     (let ((c *emacs-connection*))
-      (etypecase c
-        (multithreaded-connection
-         (send (mconn.control-thread c) event))
-        (singlethreaded-connection
-         (dispatch-event c event)))
-      (maybe-slow-down))))
+      (when (connection-open-p c)
+        (etypecase c
+          (multithreaded-connection
+           (send (mconn.control-thread c) event))
+          (singlethreaded-connection
+           (dispatch-event c event)))
+        (maybe-slow-down)))))
   
 
 ;;;;;; Flow control
@@ -1099,16 +1205,19 @@ The processing is done in the extent of the toplevel restart."
 (defconstant send-counter-limit 100)
 
 (defun maybe-slow-down ()
-  (let ((counter (incf *send-counter*)))
-    (when (< send-counter-limit counter)
-      (setf *send-counter* 0)
-      (ping-pong))))
+  (when (connection-open-p *emacs-connection*)
+    (let ((counter (incf *send-counter*)))
+      (when (< send-counter-limit counter)
+        (setf *send-counter* 0)
+        (ping-pong)))))
 
 (defun ping-pong ()
-  (let* ((tag (make-tag))
-         (pattern `(:emacs-pong ,tag)))
-    (send-to-emacs `(:ping ,(current-thread-id) ,tag))
-    (wait-for-event pattern)))
+  (when (connection-open-p *emacs-connection*)
+    (let* ((tag (make-tag))
+           (pattern `(:emacs-pong ,tag)))
+      (send-to-emacs `(:ping ,(current-thread-id) ,tag))
+      (when (connection-open-p *emacs-connection*)
+        (wait-for-event pattern)))))
 
 
 (defun wait-for-event (pattern &optional timeout)
@@ -1171,33 +1280,44 @@ event was found."
 
 
 (defun spawn-threads-for-connection (connection)
-  (setf (mconn.control-thread connection)
-        (spawn (lambda () (control-thread connection))
-               :name "control-thread"))
+  (call-with-open-connection
+   connection
+   (lambda ()
+     (setf (mconn.control-thread connection)
+           (spawn-connection-thread
+            connection
+            (lambda ()
+              (handler-case (control-thread connection)
+                (connection-closed () nil)))
+            :name "control-thread"))))
   connection)
 
 (defun control-thread (connection)
-  (with-struct* (mconn. @ connection)
-    (setf (@ control-thread) (current-thread))
-    (setf (@ reader-thread) (spawn (lambda () (read-loop connection)) 
-                                   :name "reader-thread"))
-    (setf (@ indentation-cache-thread)
-          (spawn (lambda () (indentation-cache-loop connection))
-                 :name "swank-indentation-cache-thread"))
-    (dispatch-loop connection)))
+  (call-with-open-connection
+   connection
+   (lambda ()
+     (setf (mconn.control-thread connection) (current-thread)
+           (mconn.reader-thread connection)
+           (spawn-connection-thread
+            connection (lambda () (read-loop connection))
+            :name "reader-thread")
+           (mconn.indentation-cache-thread connection)
+           (spawn-connection-thread
+            connection (lambda () (indentation-cache-loop connection))
+            :name "swank-indentation-cache-thread"))))
+  (dispatch-loop connection))
 
-(defun cleanup-connection-threads (connection)
-  (let* ((c connection)
-         (threads (list (mconn.repl-thread c)
-                        (mconn.reader-thread c)
-                        (mconn.control-thread c)
-                        (mconn.auto-flush-thread c)
-                        (mconn.indentation-cache-thread c))))
-    (dolist (thread threads)
-      (when (and thread
-                 (thread-alive-p thread)
-                 (not (equal (current-thread) thread)))
-        (ignore-errors (kill-thread thread))))))
+(defun cleanup-connection-threads (connection &optional (on-error #'error)
+                                                      (threads nil threads-p))
+  (unless threads-p
+    (setf threads
+          (call-with-lock-held (mconn.lifecycle-lock connection)
+                              (lambda () (connection-threads connection)))))
+  (dolist (thread threads)
+    (when (and thread (not (eq (current-thread) thread)))
+      (handler-case
+          (when (thread-alive-p thread) (kill-thread thread))
+        (error (condition) (funcall on-error condition))))))
 
 ;;;;;; Signal driven IO
 
