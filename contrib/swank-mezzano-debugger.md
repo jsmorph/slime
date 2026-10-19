@@ -27,6 +27,8 @@ Malformed argument lists, unknown dispatch operations, and other ordinary Lisp e
 
 Closing a multithreaded SWANK connection revokes new thread creation and requests unwinding termination of its owned RPC workers and helpers.  Selecting a thread by numeric ID gives the connection no ownership of that thread.  Termination is asynchronous.  Application cleanup can block, signal, or supersede the exit.  Notifications to a closed connection return without transmission or flow-control waits.  Retained evaluation jobs and accepted retained debugger commands continue under their guest ownership.
 
+Image restoration marks old TCP connections stale.  Their SWANK owners close and request termination of their raw workers.  A native x86-64 saved-image test verified both stale TCP directions and all four owned threads dead with one completed unwind before its finisher closed any resources.
+
 The close path attempts every owned-thread shutdown, stream close, registry removal, and closed hook.  A `SWANK::CONNECTION-CLEANUP-ERROR` retains all conditions raised by those attempts, in occurrence order, through `SWANK::CONNECTION-CLEANUP-ERROR.CONDITIONS`.  This reports teardown failures on the independent closing thread.  It does not report conditions subsequently raised by asynchronous application cleanup.  An owned worker requests closure through `SWANK::CLOSE-CONNECTION`.  Direct calls to its private synchronous teardown function reject an owned caller before changing connection state.
 
 SWANK permits arbitrary Lisp evaluation with the guest's authority.  Session names and tokens identify debugger objects within that connection.
