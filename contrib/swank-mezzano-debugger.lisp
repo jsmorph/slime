@@ -31,8 +31,7 @@
   "Perform one operation, releasing its session attachment before replying."
   (call-with-connection
    (lambda (owner)
-     (declare (ignore owner))
-     (mezzano.remote-service:transient-request name operation arguments))))
+     (mezzano.remote-service:transient-request name operation arguments owner))))
 
 (pushnew 'mezzano.remote-service:close-owner swank::*connection-closed-hook*)
 
